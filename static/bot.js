@@ -147,6 +147,7 @@ function onConferenceJoined() {
     window.__jitsiJoined = true;
     window.__jitsiRoomName = botConfig.roomName;
     window.__jitsiParticipantId = room.myUserId();
+    window.__jitsiRoom = room; // Expose room for AudioManager
     
     console.log('[Bot] My participant ID:', room.myUserId());
     console.log('[Bot] Participants:', room.getParticipants().length);
@@ -209,14 +210,146 @@ function onUserLeft(id, user) {
  * Called when a track is added
  */
 function onTrackAdded(track) {
-    console.log('[Bot] Track added:', track.getType(), 'from', track.getParticipantId());
+    const trackType = track.getType();
+    const participantId = track.getParticipantId();
+    const isLocal = track.isLocal();
+    
+    console.log('[Bot] Track added:', trackType, 'from', participantId, 'local:', isLocal);
+    
+    // Only process remote audio tracks
+    if (isLocal || trackType !== 'audio') {
+        console.log('[Bot] Skipping track (local or not audio)');
+        return;
+    }
+    
+    // Get participant info to check if it's another translator
+    const participant = room?.getParticipantById(participantId);
+    const displayName = participant?.getDisplayName() || '';
+    
+    // Skip translator participants to avoid feedback loops
+    if (displayName.startsWith('translator-')) {
+        console.log('[Bot] Skipping audio from translator participant:', displayName);
+        return;
+    }
+    
+    // Connect to AudioWorklet for capture
+    connectRemoteAudioTrack(track, participantId);
+}
+
+// Queue for tracks that arrive before audio infrastructure is ready
+window.__pendingAudioTracks = window.__pendingAudioTracks || [];
+
+/**
+ * Connects a remote audio track to the capture worklet.
+ * Also connects to a muted audio destination to force Chrome to decode the audio.
+ */
+function connectRemoteAudioTrack(track, participantId) {
+    const audio = window.__translatorAudio;
+    
+    // If audio infrastructure not ready, queue the track
+    if (!audio || !audio.audioContext || !audio.captureWorklet) {
+        console.log('[Bot] Audio infrastructure not ready, queueing track:', participantId);
+        window.__pendingAudioTracks.push({ track, participantId });
+        return;
+    }
+    
+    try {
+        // Get the underlying MediaStreamTrack
+        const mediaTrack = track.getTrack();
+        if (!mediaTrack) {
+            console.error('[Bot] No underlying MediaStreamTrack found for:', participantId);
+            return;
+        }
+        
+        console.log('[Bot] Connecting track:', {
+            participantId,
+            trackId: mediaTrack.id,
+            enabled: mediaTrack.enabled,
+            muted: mediaTrack.muted,
+            readyState: mediaTrack.readyState
+        });
+        
+        // Create MediaStream from track
+        const stream = new MediaStream([mediaTrack]);
+        
+        // Create MediaStreamSource
+        const source = audio.audioContext.createMediaStreamSource(stream);
+        
+        // CRITICAL: Connect to capture worklet for processing
+        source.connect(audio.captureWorklet);
+        
+        // CRITICAL: Also connect to a muted destination to force Chrome to decode audio
+        // Without this, headless Chrome may not actually decode the incoming audio
+        if (!audio.mutedDestination) {
+            audio.mutedDestination = audio.audioContext.createGain();
+            audio.mutedDestination.gain.value = 0; // Muted
+            audio.mutedDestination.connect(audio.audioContext.destination);
+            console.log('[Bot] Created muted destination for audio decoding');
+        }
+        source.connect(audio.mutedDestination);
+        
+        // Store for cleanup
+        if (!audio.remoteSources) {
+            audio.remoteSources = new Map();
+        }
+        audio.remoteSources.set(participantId, { source, track, mediaTrack });
+        
+        console.log('[Bot] ✓ Connected remote audio track:', participantId, '(total:', audio.remoteSources.size, ')');
+        
+    } catch (error) {
+        console.error('[Bot] Failed to connect remote audio track:', error);
+    }
+}
+
+/**
+ * Processes any pending audio tracks that were queued before audio init.
+ * Called from AudioContextManager after initialization.
+ */
+function processPendingAudioTracks() {
+    const pending = window.__pendingAudioTracks || [];
+    console.log('[Bot] Processing', pending.length, 'pending audio tracks');
+    
+    for (const { track, participantId } of pending) {
+        connectRemoteAudioTrack(track, participantId);
+    }
+    
+    window.__pendingAudioTracks = [];
 }
 
 /**
  * Called when a track is removed
  */
 function onTrackRemoved(track) {
-    console.log('[Bot] Track removed:', track.getType());
+    const trackType = track.getType();
+    const participantId = track.getParticipantId();
+    
+    console.log('[Bot] Track removed:', trackType, 'from', participantId);
+    
+    // Disconnect from audio worklet
+    if (trackType === 'audio' && !track.isLocal()) {
+        disconnectRemoteAudioTrack(participantId);
+    }
+}
+
+/**
+ * Disconnects a remote audio track from the capture worklet
+ */
+function disconnectRemoteAudioTrack(participantId) {
+    const audio = window.__translatorAudio;
+    if (!audio || !audio.remoteSources) {
+        return;
+    }
+    
+    const sourceInfo = audio.remoteSources.get(participantId);
+    if (sourceInfo) {
+        try {
+            sourceInfo.source.disconnect();
+            audio.remoteSources.delete(participantId);
+            console.log('[Bot] Disconnected remote audio track:', participantId);
+        } catch (error) {
+            console.error('[Bot] Failed to disconnect remote audio track:', error);
+        }
+    }
 }
 
 /**

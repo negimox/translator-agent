@@ -34,6 +34,18 @@ export interface AgentConfig {
 
     // Logging
     logLevel: 'debug' | 'info' | 'warn' | 'error';
+
+    // Phase 3: Chunk aggregation
+    chunkTargetDurationMs: number;
+    chunkMaxDurationMs: number;
+    chunkMinSpeechMs: number;
+    silenceCoalesceMs: number;
+
+    // Phase 3: VAD
+    vadEnergyThreshold: number;
+
+    // Phase 3: STT
+    sttSampleRate: number;
 }
 
 /**
@@ -51,6 +63,15 @@ function parseInt(value: string | undefined, defaultValue: number): number {
     if (value === undefined) return defaultValue;
     const parsed = Number.parseInt(value, 10);
     return isNaN(parsed) ? defaultValue : parsed;
+}
+
+/**
+ * Parses a float environment variable.
+ */
+function parseFloat(value: string | undefined): number | undefined {
+    if (value === undefined) return undefined;
+    const parsed = Number.parseFloat(value);
+    return isNaN(parsed) ? undefined : parsed;
 }
 
 /**
@@ -89,6 +110,18 @@ export function loadConfig(): AgentConfig {
 
         // Logging
         logLevel: (process.env.LOG_LEVEL as AgentConfig['logLevel']) || 'info',
+
+        // Phase 3: Chunk aggregation
+        chunkTargetDurationMs: parseInt(process.env.CHUNK_TARGET_DURATION_MS, 900),
+        chunkMaxDurationMs: parseInt(process.env.CHUNK_MAX_DURATION_MS, 3000),
+        chunkMinSpeechMs: parseInt(process.env.CHUNK_MIN_SPEECH_MS, 200),
+        silenceCoalesceMs: parseInt(process.env.SILENCE_COALESCE_MS, 250),
+
+        // Phase 3: VAD
+        vadEnergyThreshold: parseFloat(process.env.VAD_ENERGY_THRESHOLD) || 0.01,
+
+        // Phase 3: STT
+        sttSampleRate: parseInt(process.env.STT_SAMPLE_RATE, 16000),
     };
 }
 

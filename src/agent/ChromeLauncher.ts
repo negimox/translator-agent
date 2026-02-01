@@ -90,6 +90,11 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
             width: 1280,
             height: 720,
         },
+        // PulseAudio: Route Chrome audio to virtual sink
+        env: {
+            ...process.env,
+            PULSE_SINK: 'translator_sink',  // Chrome outputs to this sink
+        },
     };
 
     logger.debug('Launch options configured', { 

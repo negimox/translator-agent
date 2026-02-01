@@ -71,34 +71,6 @@ export interface ChromeInstance {
     close: () => Promise<void>;
 }
 
-import { existsSync } from 'fs';
-
-/**
- * Common Chromium/Chrome paths on Linux systems.
- */
-const SYSTEM_CHROMIUM_PATHS = [
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/snap/bin/chromium',
-];
-
-/**
- * Finds system-installed Chromium/Chrome.
- * Returns the path if found, undefined otherwise.
- */
-function findSystemChromium(): string | undefined {
-    for (const chromePath of SYSTEM_CHROMIUM_PATHS) {
-        if (existsSync(chromePath)) {
-            logger.debug('Found system Chromium', { path: chromePath });
-            return chromePath;
-        }
-    }
-    logger.debug('No system Chromium found, will use bundled');
-    return undefined;
-}
-
 /**
  * Launches a Puppeteer-controlled Chrome instance with the required flags.
  * 
@@ -106,27 +78,20 @@ function findSystemChromium(): string | undefined {
  * @returns ChromeInstance with browser, page, and cleanup function
  */
 export async function launchChrome(config: AgentConfig): Promise<ChromeInstance> {
+    // Check for custom Chrome path (useful when Puppeteer's bundled Chrome doesn't work)
+    const customChromePath = process.env.CHROME_EXECUTABLE_PATH;
+    
     logger.info('Launching Chrome with required flags', {
         headless: config.chromeHeadless,
         devtools: config.chromeDevtools,
+        customPath: customChromePath || 'using bundled Chrome',
     });
 
-    // Determine which browser executable to use
-    // Priority: PUPPETEER_EXECUTABLE_PATH env var > system chromium > bundled
-    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || 
-        findSystemChromium();
-    
-    if (executablePath) {
-        logger.info('Using custom Chrome/Chromium path', { executablePath });
-    }
-
-    const launchOptions = {
+    const launchOptions: Parameters<typeof puppeteer.launch>[0] = {
         // Use 'true' for headless mode (more compatible than 'shell')
         headless: config.chromeHeadless,
         devtools: config.chromeDevtools,
         args: REQUIRED_CHROME_FLAGS,
-        // Use system Chrome if specified
-        ...(executablePath && { executablePath }),
         // Default viewport for the agent
         defaultViewport: {
             width: 1280,
@@ -142,6 +107,12 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
         // Enable for debugging browser launch issues
         dumpio: process.env.DEBUG_CHROME === 'true',
     };
+
+    // Use custom Chrome path if specified
+    if (customChromePath) {
+        launchOptions.executablePath = customChromePath;
+        logger.info('Using custom Chrome executable', { path: customChromePath });
+    }
 
     logger.debug('Launch options configured', { 
         flags: REQUIRED_CHROME_FLAGS.slice(0, 5),

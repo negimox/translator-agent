@@ -3,7 +3,7 @@
  * Sets up headless Chrome with autoplay and media permissions enabled.
  */
 
-import puppeteer, { Browser, Page, PuppeteerLaunchOptions } from 'puppeteer';
+import puppeteer, { Browser, Page } from 'puppeteer';
 import { AgentConfig } from '../config';
 import { createLogger } from '../logger';
 
@@ -79,12 +79,10 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
         devtools: config.chromeDevtools,
     });
 
-    const launchOptions: PuppeteerLaunchOptions = {
-        headless: config.chromeHeadless ? 'shell' : false,
+    const launchOptions = {
+        headless: config.chromeHeadless ? 'shell' as const : false as const,
         devtools: config.chromeDevtools,
         args: REQUIRED_CHROME_FLAGS,
-        // Ignore HTTPS errors (useful for self-signed certs in dev)
-        ignoreHTTPSErrors: true,
         // Default viewport for the agent
         defaultViewport: {
             width: 1280,
@@ -95,6 +93,8 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
             ...process.env,
             PULSE_SINK: 'translator_sink',  // Chrome outputs to this sink
         },
+        // Ignore HTTPS errors (useful for self-signed certs in dev)
+        acceptInsecureCerts: true,
     };
 
     logger.debug('Launch options configured', { 
@@ -145,7 +145,7 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
 
     // Handle page errors
     page.on('pageerror', (error) => {
-        logger.error('Page error occurred', { error: error.message });
+        logger.error('Page error occurred', { error: (error as Error).message });
     });
 
     // Handle request failures (useful for debugging)

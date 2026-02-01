@@ -71,6 +71,34 @@ export interface ChromeInstance {
     close: () => Promise<void>;
 }
 
+import { existsSync } from 'fs';
+
+/**
+ * Common Chromium/Chrome paths on Linux systems.
+ */
+const SYSTEM_CHROMIUM_PATHS = [
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/snap/bin/chromium',
+];
+
+/**
+ * Finds system-installed Chromium/Chrome.
+ * Returns the path if found, undefined otherwise.
+ */
+function findSystemChromium(): string | undefined {
+    for (const chromePath of SYSTEM_CHROMIUM_PATHS) {
+        if (existsSync(chromePath)) {
+            logger.debug('Found system Chromium', { path: chromePath });
+            return chromePath;
+        }
+    }
+    logger.debug('No system Chromium found, will use bundled');
+    return undefined;
+}
+
 /**
  * Launches a Puppeteer-controlled Chrome instance with the required flags.
  * 
@@ -83,11 +111,22 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
         devtools: config.chromeDevtools,
     });
 
+    // Determine which browser executable to use
+    // Priority: PUPPETEER_EXECUTABLE_PATH env var > system chromium > bundled
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || 
+        findSystemChromium();
+    
+    if (executablePath) {
+        logger.info('Using custom Chrome/Chromium path', { executablePath });
+    }
+
     const launchOptions = {
         // Use 'true' for headless mode (more compatible than 'shell')
         headless: config.chromeHeadless,
         devtools: config.chromeDevtools,
         args: REQUIRED_CHROME_FLAGS,
+        // Use system Chrome if specified
+        ...(executablePath && { executablePath }),
         // Default viewport for the agent
         defaultViewport: {
             width: 1280,

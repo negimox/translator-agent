@@ -59,13 +59,21 @@ apt-get install -y \
 echo "✓ Chrome dependencies installed"
 
 echo ""
-echo "=== Step 2: Installing PulseAudio ==="
+echo "=== Step 2: Installing Chromium browser ==="
+apt-get install -y chromium-browser || apt-get install -y chromium
+
+echo "✓ Chromium installed"
+echo ""
+echo "Chromium path: $(which chromium-browser || which chromium)"
+
+echo ""
+echo "=== Step 3: Installing PulseAudio ==="
 apt-get install -y pulseaudio pulseaudio-utils
 
 echo "✓ PulseAudio installed"
 
 echo ""
-echo "=== Step 3: Setting up virtual audio sink ==="
+echo "=== Step 4: Setting up virtual audio sink ==="
 # Switch to actual user for pulseaudio commands
 sudo -u $ACTUAL_USER bash << 'EOF'
 # Start PulseAudio if not running
@@ -84,7 +92,7 @@ fi
 EOF
 
 echo ""
-echo "=== Step 4: Verifying setup ==="
+echo "=== Step 5: Verifying setup ==="
 sudo -u $ACTUAL_USER pactl list short sinks | grep translator || echo "Warning: translator_sink not found"
 
 echo ""

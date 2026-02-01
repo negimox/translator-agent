@@ -101,8 +101,8 @@ export function loadConfig(): AgentConfig {
         audioContextResumeRetries: parseInt(process.env.AUDIOCONTEXT_RESUME_RETRIES, 5),
         audioContextResumeBackoffMs: parseInt(process.env.AUDIOCONTEXT_RESUME_BACKOFF_MS, 500),
 
-        // Health check
-        healthPort: parseInt(process.env.HEALTH_PORT, 8080),
+        // Health check - using 9090 to avoid conflict with Jitsi (8080)
+        healthPort: parseInt(process.env.HEALTH_PORT, 9090),
 
         // Puppeteer settings
         chromeHeadless: parseBool(process.env.CHROME_HEADLESS, true),

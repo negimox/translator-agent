@@ -1,0 +1,240 @@
+/**
+ * Main Translator Agent class.
+ * Orchestrates the headless Chrome browser, meeting connection, and audio infrastructure.
+ */
+
+import { Page } from 'puppeteer';
+import { AgentConfig, getDisplayName, getMeetingUrl } from '../config';
+import { createLogger } from '../logger';
+import { ChromeInstance, launchChrome, isChromeLive } from './ChromeLauncher';
+import { AudioManager, AudioHealth } from '../audio/AudioContextManager';
+import { HeartbeatMonitor } from '../audio/HeartbeatMonitor';
+import { JitsiConnection } from '../meeting/JitsiConnection';
+import { BotPageServer } from '../server/BotPageServer';
+import { HealthStatus, AgentHealthState } from '../health/HealthChecks';
+
+const logger = createLogger('TranslatorAgent');
+
+/**
+ * Bot page server port.
+ */
+const BOT_PAGE_PORT = 3001;
+
+/**
+ * Agent lifecycle states.
+ */
+export enum AgentState {
+    IDLE = 'idle',
+    STARTING = 'starting',
+    CONNECTING = 'connecting',
+    JOINED = 'joined',
+    ERROR = 'error',
+    STOPPING = 'stopping',
+    STOPPED = 'stopped',
+}
+
+/**
+ * Main Translator Agent class.
+ * Manages the lifecycle of a translator agent that joins a Jitsi meeting.
+ */
+export class TranslatorAgent {
+    private config: AgentConfig;
+    private chrome: ChromeInstance | null = null;
+    private audioManager: AudioManager | null = null;
+    private heartbeatMonitor: HeartbeatMonitor | null = null;
+    private jitsiConnection: JitsiConnection | null = null;
+    private botPageServer: BotPageServer | null = null;
+    private state: AgentState = AgentState.IDLE;
+    private startTime: Date | null = null;
+
+    constructor(config: AgentConfig) {
+        this.config = config;
+        logger.info('TranslatorAgent created', {
+            displayName: getDisplayName(config),
+            meetingUrl: getMeetingUrl(config),
+        });
+    }
+
+    /**
+     * Gets the current agent state.
+     */
+    getState(): AgentState {
+        return this.state;
+    }
+
+    /**
+     * Starts the translator agent.
+     * Launches Chrome, connects to the meeting, and initializes audio infrastructure.
+     */
+    async start(): Promise<void> {
+        if (this.state !== AgentState.IDLE && this.state !== AgentState.STOPPED) {
+            throw new Error(`Cannot start agent in state: ${this.state}`);
+        }
+
+        this.state = AgentState.STARTING;
+        this.startTime = new Date();
+        logger.info('Starting translator agent');
+
+        try {
+            // Step 1: Start bot page server
+            logger.info('Step 1: Starting bot page server');
+            this.botPageServer = new BotPageServer(BOT_PAGE_PORT);
+            await this.botPageServer.start();
+
+            // Step 2: Launch Chrome
+            logger.info('Step 2: Launching Chrome');
+            this.chrome = await launchChrome(this.config);
+            
+            // Step 3: Connect to meeting via bot page
+            logger.info('Step 3: Connecting to Jitsi meeting');
+            this.state = AgentState.CONNECTING;
+            
+            const botPageUrl = this.botPageServer.getBotPageUrl(
+                this.config.jitsiDomain,
+                this.config.roomName,
+                getDisplayName(this.config)
+            );
+            logger.info('Bot page URL', { botPageUrl });
+            
+            this.jitsiConnection = new JitsiConnection(this.config, this.chrome.page, botPageUrl);
+            await this.jitsiConnection.connect();
+
+            // Step 4: Initialize audio infrastructure (optional for now - bot.js handles audio)
+            logger.info('Step 4: Meeting joined, initializing audio infrastructure');
+            this.audioManager = new AudioManager(this.config, this.chrome.page);
+            await this.audioManager.initialize();
+
+            // Step 5: Start heartbeat monitoring
+            logger.info('Step 5: Starting heartbeat monitor');
+            this.heartbeatMonitor = new HeartbeatMonitor(
+                this.config,
+                this.chrome.page,
+                () => this.handleHeartbeatTimeout()
+            );
+            await this.heartbeatMonitor.start();
+
+            this.state = AgentState.JOINED;
+            logger.info('Translator agent successfully started and joined meeting', {
+                displayName: getDisplayName(this.config),
+                meetingUrl: getMeetingUrl(this.config),
+            });
+
+        } catch (error) {
+            this.state = AgentState.ERROR;
+            logger.error('Failed to start translator agent', { error: String(error) });
+            await this.cleanup();
+            throw error;
+        }
+    }
+
+
+
+    /**
+     * Handles heartbeat timeout by reinitializing the audio worklet.
+     */
+    private async handleHeartbeatTimeout(): Promise<void> {
+        logger.warn('Heartbeat timeout detected, attempting recovery');
+
+        if (this.audioManager) {
+            try {
+                await this.audioManager.reinitialize();
+                logger.info('Audio infrastructure reinitialized successfully');
+            } catch (error) {
+                logger.error('Failed to reinitialize audio', { error: String(error) });
+                // Consider transitioning to ERROR state if recovery fails repeatedly
+            }
+        }
+    }
+
+    /**
+     * Stops the translator agent and cleans up resources.
+     */
+    async stop(): Promise<void> {
+        if (this.state === AgentState.STOPPED || this.state === AgentState.STOPPING) {
+            return;
+        }
+
+        this.state = AgentState.STOPPING;
+        logger.info('Stopping translator agent');
+
+        await this.cleanup();
+
+        this.state = AgentState.STOPPED;
+        logger.info('Translator agent stopped');
+    }
+
+    /**
+     * Cleans up all resources.
+     */
+    private async cleanup(): Promise<void> {
+        // Stop heartbeat monitor
+        if (this.heartbeatMonitor) {
+            this.heartbeatMonitor.stop();
+            this.heartbeatMonitor = null;
+        }
+
+        // Cleanup audio manager
+        if (this.audioManager) {
+            await this.audioManager.cleanup();
+            this.audioManager = null;
+        }
+
+        // Disconnect from meeting
+        if (this.jitsiConnection) {
+            await this.jitsiConnection.disconnect();
+            this.jitsiConnection = null;
+        }
+
+        // Close Chrome
+        if (this.chrome) {
+            await this.chrome.close();
+            this.chrome = null;
+        }
+
+        // Stop bot page server
+        if (this.botPageServer) {
+            await this.botPageServer.stop();
+            this.botPageServer = null;
+        }
+    }
+
+    /**
+     * Gets the current health status of the agent.
+     */
+    getHealth(): AgentHealthState {
+        const chromeHealthy = this.chrome !== null && isChromeLive(this.chrome);
+        // Note: audioManager.getHealth() is async but we use cached values here
+        // for sync access. A more robust solution would cache the health state.
+        const audioHealth: AudioHealth = {
+            contextState: 'closed',
+            captureActive: false,
+            outputActive: false,
+        };
+        const heartbeatHealthy = this.heartbeatMonitor?.isHealthy() ?? false;
+        const meetingConnected = this.jitsiConnection?.isConnected() ?? false;
+
+        // For immediate health checks, we assume audio is healthy if manager exists
+        const audioReady = this.audioManager !== null;
+
+        const isHealthy = 
+            chromeHealthy && 
+            audioReady &&
+            heartbeatHealthy &&
+            meetingConnected;
+
+        return {
+            state: this.state,
+            healthy: isHealthy,
+            chrome: chromeHealthy,
+            audioContext: audioReady ? 'running' : 'closed',
+            captureActive: audioReady,
+            outputActive: audioReady,
+            heartbeatHealthy,
+            meetingConnected,
+            uptime: this.startTime 
+                ? Math.floor((Date.now() - this.startTime.getTime()) / 1000)
+                : 0,
+        };
+    }
+
+}

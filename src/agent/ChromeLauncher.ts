@@ -25,6 +25,7 @@ export const REQUIRED_CHROME_FLAGS: string[] = [
     
     // Disable GPU for headless stability
     '--disable-gpu',
+    '--disable-software-rasterizer',
     
     // Required in containerized environments (Docker, K8s)
     '--no-sandbox',
@@ -47,6 +48,9 @@ export const REQUIRED_CHROME_FLAGS: string[] = [
     
     // WebRTC-specific
     '--disable-features=WebRtcHideLocalIpsWithMdns',
+    
+    // Audio output - use PulseAudio
+    '--alsa-output-device=pulse',
 ];
 
 /**
@@ -80,7 +84,8 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
     });
 
     const launchOptions = {
-        headless: config.chromeHeadless ? 'shell' as const : false as const,
+        // Use 'true' for headless mode (more compatible than 'shell')
+        headless: config.chromeHeadless,
         devtools: config.chromeDevtools,
         args: REQUIRED_CHROME_FLAGS,
         // Default viewport for the agent
@@ -95,6 +100,8 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
         },
         // Ignore HTTPS errors (useful for self-signed certs in dev)
         acceptInsecureCerts: true,
+        // Enable for debugging browser launch issues
+        dumpio: process.env.DEBUG_CHROME === 'true',
     };
 
     logger.debug('Launch options configured', { 
@@ -102,7 +109,19 @@ export async function launchChrome(config: AgentConfig): Promise<ChromeInstance>
         flagCount: REQUIRED_CHROME_FLAGS.length 
     });
 
-    const browser = await puppeteer.launch(launchOptions);
+    let browser: Browser;
+    try {
+        browser = await puppeteer.launch(launchOptions);
+    } catch (launchError) {
+        // Provide more helpful error message
+        const errorMsg = launchError instanceof Error ? launchError.message : String(launchError);
+        logger.error('Chrome launch failed', { 
+            error: errorMsg,
+            hint: 'Try running: npx puppeteer browsers install chrome',
+        });
+        throw new Error(`Failed to launch Chrome: ${errorMsg}`);
+    }
+
     logger.info('Chrome browser launched successfully');
 
     // Get or create the first page

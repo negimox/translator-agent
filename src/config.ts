@@ -17,6 +17,7 @@ export interface AgentConfig {
   jitsiDomain: string;
   roomName: string;
   targetLanguage: string;
+  sourceLanguage: string; // Phase 4: Source language for STT
   displayNamePrefix: string;
 
   // Audio/Worklet settings (Phase 2)
@@ -47,6 +48,41 @@ export interface AgentConfig {
   // Puppeteer settings
   chromeHeadless: boolean;
   chromeDevtools: boolean;
+
+  // ============================================================================
+  // Mizan API settings (Phase 4)
+  // ============================================================================
+  mizanBaseUrl: string;
+  mizanUsername: string;
+  mizanPassword: string;
+  mizanTimeoutMs: number;
+
+  // Translation settings (Phase 4)
+  translationTemplatePattern: string; // e.g., 'translator_{source}_to_{target}'
+  ttsVoice: string;
+  ttsSpeed: number;
+
+  // Rate limiting (Phase 4)
+  tokenBucketCapacity: number;
+  tokenBucketRefillRate: number;
+
+  // Circuit breaker (Phase 4)
+  circuitBreakerErrorThreshold: number;
+  circuitBreakerWindowMs: number;
+  circuitBreakerOpenTimeoutMs: number;
+
+  // Queue settings (Phase 4)
+  maxQueueLength: number;
+  maxInFlight: number;
+
+  // Retry settings (Phase 4)
+  retryInitialDelayMs: number;
+  retryMaxDelayMs: number;
+  maxRetries: number;
+
+  // Adaptive chunking (Phase 4)
+  adaptiveChunkingEnabled: boolean;
+  adaptiveUpdateIntervalMs: number;
 
   // Logging
   logLevel: "debug" | "info" | "warn" | "error";
@@ -97,6 +133,7 @@ export function loadConfig(): AgentConfig {
     jitsiDomain: validateRequired("JITSI_DOMAIN", process.env.JITSI_DOMAIN),
     roomName: validateRequired("ROOM_NAME", process.env.ROOM_NAME),
     targetLanguage: process.env.TARGET_LANGUAGE || "en",
+    sourceLanguage: process.env.SOURCE_LANGUAGE || "en", // Phase 4
     displayNamePrefix: process.env.AGENT_DISPLAY_NAME_PREFIX || "translator-",
 
     // Audio/Worklet settings (Phase 2)
@@ -136,6 +173,58 @@ export function loadConfig(): AgentConfig {
     // Puppeteer settings
     chromeHeadless: parseBool(process.env.CHROME_HEADLESS, true),
     chromeDevtools: parseBool(process.env.CHROME_DEVTOOLS, false),
+
+    // ============================================================================
+    // Mizan API settings (Phase 4)
+    // ============================================================================
+    mizanBaseUrl:
+      process.env.MIZAN_BASE_URL || "https://platform.mizanlabs.com/api/v1",
+    mizanUsername: process.env.MIZAN_USERNAME || "",
+    mizanPassword: process.env.MIZAN_PASSWORD || "",
+    mizanTimeoutMs: parseInt(process.env.MIZAN_TIMEOUT_MS, 30000),
+
+    // Translation settings (Phase 4)
+    translationTemplatePattern:
+      process.env.TRANSLATION_TEMPLATE_PATTERN || "translator_{target}",
+    ttsVoice: process.env.TTS_VOICE || "af_heart",
+    ttsSpeed: parseFloat(process.env.TTS_SPEED, 1.0),
+
+    // Rate limiting (Phase 4)
+    tokenBucketCapacity: parseInt(process.env.TOKEN_BUCKET_CAPACITY, 8),
+    tokenBucketRefillRate: parseInt(process.env.TOKEN_BUCKET_REFILL_RATE, 8),
+
+    // Circuit breaker (Phase 4)
+    circuitBreakerErrorThreshold: parseFloat(
+      process.env.CIRCUIT_BREAKER_ERROR_THRESHOLD,
+      0.1,
+    ),
+    circuitBreakerWindowMs: parseInt(
+      process.env.CIRCUIT_BREAKER_WINDOW_MS,
+      60000,
+    ),
+    circuitBreakerOpenTimeoutMs: parseInt(
+      process.env.CIRCUIT_BREAKER_OPEN_TIMEOUT_MS,
+      10000,
+    ),
+
+    // Queue settings (Phase 4)
+    maxQueueLength: parseInt(process.env.MAX_QUEUE_LENGTH, 12),
+    maxInFlight: parseInt(process.env.MAX_IN_FLIGHT, 2),
+
+    // Retry settings (Phase 4)
+    retryInitialDelayMs: parseInt(process.env.RETRY_INITIAL_DELAY_MS, 500),
+    retryMaxDelayMs: parseInt(process.env.RETRY_MAX_DELAY_MS, 8000),
+    maxRetries: parseInt(process.env.MAX_RETRIES, 3),
+
+    // Adaptive chunking (Phase 4)
+    adaptiveChunkingEnabled: parseBool(
+      process.env.ADAPTIVE_CHUNKING_ENABLED,
+      true,
+    ),
+    adaptiveUpdateIntervalMs: parseInt(
+      process.env.ADAPTIVE_UPDATE_INTERVAL_MS,
+      1000,
+    ),
 
     // Logging
     logLevel: (process.env.LOG_LEVEL as AgentConfig["logLevel"]) || "info",

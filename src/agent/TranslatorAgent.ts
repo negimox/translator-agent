@@ -6,6 +6,12 @@
  * - AudioBridge for chunk aggregation
  * - VAD-driven audio capture
  * - Debug chunk file saving
+ *
+ * Phase 4 additions:
+ * - TranslationPipeline integration
+ * - Mizan API orchestration
+ * - Rate limiting and circuit breaker
+ * - Adaptive chunking
  */
 
 import { Page } from "puppeteer";
@@ -18,6 +24,12 @@ import { AudioBridge, AudioChunk } from "../audio/AudioBridge";
 import { JitsiConnection } from "../meeting/JitsiConnection";
 import { BotPageServer } from "../server/BotPageServer";
 import { HealthStatus, AgentHealthState } from "../health/HealthChecks";
+import {
+  TranslationPipeline,
+  AdaptiveChunkController,
+  PipelineResult,
+  CircuitState,
+} from "../mizan";
 
 const logger = createLogger("TranslatorAgent");
 
@@ -35,6 +47,7 @@ export enum AgentState {
   CONNECTING = "connecting",
   JOINED = "joined",
   CAPTURING = "capturing", // Phase 3: Added state for audio capture
+  TRANSLATING = "translating", // Phase 4: Translation pipeline active
   ERROR = "error",
   STOPPING = "stopping",
   STOPPED = "stopped",
@@ -55,8 +68,17 @@ export class TranslatorAgent {
   private state: AgentState = AgentState.IDLE;
   private startTime: Date | null = null;
 
+  // Phase 4: Translation pipeline
+  private translationPipeline: TranslationPipeline | null = null;
+  private adaptiveChunkController: AdaptiveChunkController | null = null;
+
   // Phase 3: Chunk callback for external processing
   private onChunkCallback: ((chunk: AudioChunk) => void) | null = null;
+
+  // Phase 4: Audio output callback
+  private onAudioOutputCallback:
+    | ((audio: ArrayBuffer, chunkId: string) => void)
+    | null = null;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -144,10 +166,18 @@ export class TranslatorAgent {
       await this.initializeAudioBridge();
 
       this.state = AgentState.CAPTURING;
-      logger.info("Translator agent successfully started and capturing audio", {
+
+      // Step 7 (Phase 4): Initialize translation pipeline
+      logger.info("Step 7: Initializing translation pipeline");
+      await this.initializeTranslationPipeline();
+
+      this.state = AgentState.TRANSLATING;
+      logger.info("Translator agent successfully started and translating", {
         displayName: getDisplayName(this.config),
         meetingUrl: getMeetingUrl(this.config),
         debugMode: this.config.debugMode,
+        sourceLanguage: this.config.sourceLanguage,
+        targetLanguage: this.config.targetLanguage,
       });
     } catch (error) {
       this.state = AgentState.ERROR;
@@ -227,10 +257,140 @@ export class TranslatorAgent {
       durationMs: chunk.durationMs,
     });
 
+    // Phase 4: Submit chunk to translation pipeline
+    if (this.translationPipeline) {
+      const submitted = this.translationPipeline.submitChunk(chunk);
+      if (!submitted) {
+        logger.warn("Chunk not submitted to pipeline (queue full)", {
+          chunkId: chunk.chunkId,
+        });
+      }
+    }
+
     // Call external callback if registered (for Phase 4+ orchestration)
     if (this.onChunkCallback) {
       this.onChunkCallback(chunk);
     }
+  }
+
+  /**
+   * Phase 4: Initializes the translation pipeline.
+   */
+  private async initializeTranslationPipeline(): Promise<void> {
+    // Validate Mizan credentials
+    if (!this.config.mizanUsername || !this.config.mizanPassword) {
+      logger.warn(
+        "Mizan credentials not configured - translation pipeline disabled",
+      );
+      return;
+    }
+
+    // Create translation pipeline
+    this.translationPipeline = new TranslationPipeline({
+      mizan: {
+        baseUrl: this.config.mizanBaseUrl,
+        username: this.config.mizanUsername,
+        password: this.config.mizanPassword,
+        timeoutMs: this.config.mizanTimeoutMs,
+      },
+      sourceLanguage: this.config.sourceLanguage,
+      targetLanguage: this.config.targetLanguage,
+      translationTemplatePattern: this.config.translationTemplatePattern,
+      ttsVoice: this.config.ttsVoice,
+      ttsSpeed: this.config.ttsSpeed,
+      retryInitialDelayMs: this.config.retryInitialDelayMs,
+      retryMaxDelayMs: this.config.retryMaxDelayMs,
+      maxRetries: this.config.maxRetries,
+      tokenBucketCapacity: this.config.tokenBucketCapacity,
+      tokenBucketRefillRate: this.config.tokenBucketRefillRate,
+      circuitBreakerErrorThreshold: this.config.circuitBreakerErrorThreshold,
+      circuitBreakerWindowMs: this.config.circuitBreakerWindowMs,
+      circuitBreakerOpenTimeoutMs: this.config.circuitBreakerOpenTimeoutMs,
+      maxQueueLength: this.config.maxQueueLength,
+      maxInFlight: this.config.maxInFlight,
+      debugMode: this.config.debugMode,
+      debugOutputDir: this.config.debugOutputDir,
+    });
+
+    // Set up event handlers
+    this.translationPipeline.on("chunkProcessed", (result: PipelineResult) => {
+      logger.info("Translation completed", {
+        chunkId: result.chunkId,
+        latencyMs: result.latencyMs,
+        transcriptionLength: result.transcription?.length || 0,
+        translationLength: result.translation?.length || 0,
+      });
+    });
+
+    this.translationPipeline.on("chunkFailed", (result: PipelineResult) => {
+      logger.error("Translation failed", {
+        chunkId: result.chunkId,
+        error: result.error,
+        retries: result.retries,
+      });
+    });
+
+    this.translationPipeline.on("circuitStateChange", (event) => {
+      logger.warn("Circuit breaker state changed", event);
+    });
+
+    this.translationPipeline.on("backpressure", (data) => {
+      logger.warn("Pipeline backpressure detected", data);
+    });
+
+    // Set audio output callback (for Phase 5+)
+    this.translationPipeline.setOnAudioReady((audio, chunkId) => {
+      logger.debug("Translated audio ready", {
+        chunkId,
+        audioSize: audio.byteLength,
+      });
+
+      // Call external callback if registered
+      if (this.onAudioOutputCallback) {
+        this.onAudioOutputCallback(audio, chunkId);
+      }
+
+      // TODO: Phase 5/6 - Feed audio to MediaStreamDestination for playback
+    });
+
+    // Initialize adaptive chunk controller if enabled
+    if (this.config.adaptiveChunkingEnabled && this.audioBridge) {
+      this.adaptiveChunkController = new AdaptiveChunkController({
+        defaultChunkDurationMs: this.config.targetChunkDurationMs,
+        minChunkDurationMs: this.config.minChunkDurationMs,
+        maxChunkDurationMs: this.config.maxChunkDurationMs,
+        updateIntervalMs: this.config.adaptiveUpdateIntervalMs,
+      });
+
+      // Connect to pipeline components
+      this.adaptiveChunkController.connect(
+        this.translationPipeline.getTokenBucket(),
+        this.translationPipeline.getQueue(),
+        this.audioBridge.getAggregator(),
+      );
+
+      this.adaptiveChunkController.start();
+      logger.info("Adaptive chunk controller started");
+    }
+
+    // Start the pipeline
+    this.translationPipeline.start();
+
+    logger.info("Translation pipeline initialized", {
+      sourceLanguage: this.config.sourceLanguage,
+      targetLanguage: this.config.targetLanguage,
+      adaptiveChunking: this.config.adaptiveChunkingEnabled,
+    });
+  }
+
+  /**
+   * Sets a callback for when translated audio is ready (Phase 4+).
+   */
+  setOnAudioOutputCallback(
+    callback: (audio: ArrayBuffer, chunkId: string) => void,
+  ): void {
+    this.onAudioOutputCallback = callback;
+    logger.info("Audio output callback registered");
   }
 
   /**
@@ -282,6 +442,18 @@ export class TranslatorAgent {
    * Cleans up all resources.
    */
   private async cleanup(): Promise<void> {
+    // Stop adaptive chunk controller (Phase 4)
+    if (this.adaptiveChunkController) {
+      this.adaptiveChunkController.stop();
+      this.adaptiveChunkController = null;
+    }
+
+    // Stop translation pipeline (Phase 4)
+    if (this.translationPipeline) {
+      this.translationPipeline.stop();
+      this.translationPipeline = null;
+    }
+
     // Stop audio bridge (Phase 3)
     if (this.audioBridge) {
       await this.audioBridge.stop();
@@ -340,8 +512,15 @@ export class TranslatorAgent {
     // Phase 3: Check audio bridge health
     const audioBridgeRunning = this.audioBridge !== null;
 
+    // Phase 4: Check pipeline health
+    const pipelineHealthy = this.translationPipeline?.isHealthy() ?? true;
+
     const isHealthy =
-      chromeHealthy && audioReady && heartbeatHealthy && meetingConnected;
+      chromeHealthy &&
+      audioReady &&
+      heartbeatHealthy &&
+      meetingConnected &&
+      pipelineHealthy;
 
     return {
       state: this.state,
@@ -352,6 +531,7 @@ export class TranslatorAgent {
       outputActive: audioReady,
       heartbeatHealthy,
       meetingConnected,
+      pipelineHealthy,
       uptime: this.startTime
         ? Math.floor((Date.now() - this.startTime.getTime()) / 1000)
         : 0,
@@ -376,6 +556,20 @@ export class TranslatorAgent {
       chunksEmitted: metrics.aggregatorMetrics.totalChunksEmitted,
       isCapturing: metrics.isRunning,
     };
+  }
+
+  /**
+   * Phase 4: Gets the translation pipeline metrics.
+   */
+  getPipelineMetrics() {
+    return this.translationPipeline?.getMetrics() ?? null;
+  }
+
+  /**
+   * Phase 4: Gets the translation pipeline.
+   */
+  getTranslationPipeline() {
+    return this.translationPipeline;
   }
 
   /**

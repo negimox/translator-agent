@@ -167,6 +167,20 @@ export class TranslatorAgent {
 
       this.state = AgentState.CAPTURING;
 
+      // Step 6.5 (Phase 5): Publish local audio track for translated audio
+      logger.info(
+        "Step 6.5: Publishing local audio track for translated audio",
+      );
+      try {
+        await this.audioManager!.publishLocalTrack();
+      } catch (error) {
+        logger.error(
+          "Failed to publish local audio track - playback will be unavailable",
+          { error: String(error) },
+        );
+        // Non-fatal: continue with capture and translation even if playback fails
+      }
+
       // Step 7 (Phase 4): Initialize translation pipeline
       logger.info("Step 7: Initializing translation pipeline");
       await this.initializeTranslationPipeline();
@@ -338,19 +352,34 @@ export class TranslatorAgent {
       logger.warn("Pipeline backpressure detected", data);
     });
 
-    // Set audio output callback (for Phase 5+)
-    this.translationPipeline.setOnAudioReady((audio, chunkId) => {
-      logger.debug("Translated audio ready", {
+    // Set audio output callback (Phase 5: Play translated audio)
+    this.translationPipeline.setOnAudioReady(async (audio, chunkId) => {
+      logger.info("Playing translated audio", {
         chunkId,
         audioSize: audio.byteLength,
       });
+
+      // Play the MP3 audio via local HTTP (avoids base64 over CDP)
+      if (this.audioManager && this.botPageServer) {
+        try {
+          const audioUrl = this.botPageServer.storeTtsAudio(
+            chunkId,
+            Buffer.from(audio),
+          );
+          await this.audioManager.playMp3AudioFromUrl(audioUrl);
+          logger.info("Translated audio playback started", { chunkId });
+        } catch (error) {
+          logger.error("Failed to play translated audio", {
+            chunkId,
+            error: String(error),
+          });
+        }
+      }
 
       // Call external callback if registered
       if (this.onAudioOutputCallback) {
         this.onAudioOutputCallback(audio, chunkId);
       }
-
-      // TODO: Phase 5/6 - Feed audio to MediaStreamDestination for playback
     });
 
     // Initialize adaptive chunk controller if enabled
@@ -502,6 +531,13 @@ export class TranslatorAgent {
       contextState: "closed",
       captureActive: false,
       outputActive: false,
+      playback: {
+        trackPublished: false,
+        trackMuted: true,
+        destinationActive: false,
+        queueLength: 0,
+        isPlaying: false,
+      },
     };
     const heartbeatHealthy = this.heartbeatMonitor?.isHealthy() ?? false;
     const meetingConnected = this.jitsiConnection?.isConnected() ?? false;
@@ -577,5 +613,21 @@ export class TranslatorAgent {
    */
   getAggregator() {
     return this.audioBridge?.getAggregator() ?? null;
+  }
+
+  /**
+   * Phase 5: Gets async playback health from the browser.
+   */
+  async getPlaybackHealth(): Promise<{
+    trackPublished: boolean;
+    trackMuted: boolean;
+    destinationActive: boolean;
+    queueLength: number;
+    isPlaying: boolean;
+  } | null> {
+    if (!this.audioManager) {
+      return null;
+    }
+    return await this.audioManager.getPlaybackHealth();
   }
 }

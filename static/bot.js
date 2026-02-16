@@ -11,6 +11,12 @@ let room = null;
 let connectionEstablished = false;
 let roomJoined = false;
 
+// Phase 5: Playback state
+let localAudioTrack = null;
+let playbackQueue = [];
+let isPlaying = false;
+const MAX_PLAYBACK_QUEUE = 3;
+
 // Configuration from URL parameters
 // Note: Named 'botConfig' to avoid conflict with Jitsi's global 'config' variable
 const urlParams = new URLSearchParams(window.location.search);
@@ -949,3 +955,327 @@ window.__botLoaded = true;
 
 // Start loading dependencies
 loadJitsiDependencies();
+
+// ============================================================================
+// Phase 5: Audio Track Publishing & TTS Playback
+// ============================================================================
+
+/**
+ * Overrides navigator.mediaDevices.getUserMedia to return our
+ * MediaStreamDestination stream instead of a real microphone.
+ *
+ * Pattern from jitsi-bot/soundboard: when JitsiMeetJS.createLocalTracks()
+ * internally calls getUserMedia for audio, it receives our translated
+ * audio stream instead.
+ */
+function overrideGetUserMedia() {
+  const audio = window.__translatorAudio;
+  if (!audio || !audio.mediaStreamDestination) {
+    console.error(
+      "[Bot] Cannot override getUserMedia - MediaStreamDestination not ready",
+    );
+    return false;
+  }
+
+  const destStream = audio.mediaStreamDestination;
+  console.log(
+    "[Bot] Overriding getUserMedia to return MediaStreamDestination stream",
+    {
+      streamId: destStream.stream.id,
+      active: destStream.stream.active,
+      audioTracks: destStream.stream.getAudioTracks().length,
+    },
+  );
+
+  navigator.mediaDevices.getUserMedia = async function (constraints) {
+    console.log("[Bot] getUserMedia called with constraints:", constraints);
+    if (constraints && constraints.audio) {
+      console.log("[Bot] Returning MediaStreamDestination stream for audio");
+      return destStream.stream;
+    }
+    // For video or other constraints, return empty stream
+    return new MediaStream();
+  };
+
+  return true;
+}
+
+/**
+ * Creates a local audio track from MediaStreamDestination and publishes it
+ * to the Jitsi conference. Other participants will receive this audio.
+ *
+ * Must be called AFTER:
+ * - AudioManager has initialized (MediaStreamDestination exists)
+ * - Conference room is joined
+ */
+window.publishTranslatedAudioTrack = async function () {
+  console.log("[Bot] publishTranslatedAudioTrack called");
+
+  if (!room || !roomJoined) {
+    console.error("[Bot] Cannot publish track - room not joined");
+    return { success: false, error: "Room not joined" };
+  }
+
+  const audio = window.__translatorAudio;
+  if (!audio || !audio.mediaStreamDestination) {
+    console.error(
+      "[Bot] Cannot publish track - MediaStreamDestination not ready",
+    );
+    return { success: false, error: "MediaStreamDestination not ready" };
+  }
+
+  // Step 1: Override getUserMedia
+  if (!overrideGetUserMedia()) {
+    return { success: false, error: "Failed to override getUserMedia" };
+  }
+
+  try {
+    // Step 2: Create local tracks via JitsiMeetJS (uses overridden getUserMedia)
+    console.log("[Bot] Creating local audio tracks via JitsiMeetJS...");
+    const tracks = await JitsiMeetJS.createLocalTracks({ devices: ["audio"] });
+
+    const audioTrack = tracks.find(function (t) {
+      return t.getType() === "audio";
+    });
+
+    if (!audioTrack) {
+      console.error("[Bot] No audio track created by JitsiMeetJS");
+      return { success: false, error: "No audio track created" };
+    }
+
+    console.log("[Bot] Local audio track created:", {
+      type: audioTrack.getType(),
+      id: audioTrack.getId ? audioTrack.getId() : "unknown",
+    });
+
+    // Step 3: Add track to room
+    await room.addTrack(audioTrack);
+    localAudioTrack = audioTrack;
+
+    // Add lifecycle event listeners
+    audioTrack.addEventListener(
+      JitsiMeetJS.events.track.TRACK_MUTE_CHANGED,
+      function () {
+        console.log(
+          "[Bot] Local audio track mute changed:",
+          audioTrack.isMuted(),
+        );
+      },
+    );
+
+    audioTrack.addEventListener(
+      JitsiMeetJS.events.track.LOCAL_TRACK_STOPPED,
+      function () {
+        console.log("[Bot] Local audio track stopped");
+        localAudioTrack = null;
+      },
+    );
+
+    console.log("[Bot] Local audio track published to room successfully");
+
+    // Step 4: Handle JVB workaround - re-add track on media session change
+    room.on(
+      JitsiMeetJS.events.conference._MEDIA_SESSION_ACTIVE_CHANGED,
+      function (jingleSession) {
+        if (
+          localAudioTrack &&
+          jingleSession.peerconnection &&
+          jingleSession.peerconnection.localTracks &&
+          jingleSession.peerconnection.localTracks.size === 0
+        ) {
+          console.log("[Bot] JVB workaround: re-adding local audio track");
+          room.addTrack(localAudioTrack);
+        }
+      },
+    );
+
+    return { success: true };
+  } catch (error) {
+    console.error("[Bot] Failed to publish audio track:", error);
+    return { success: false, error: error.message || String(error) };
+  }
+};
+
+/**
+ * Plays translated MP3 audio through the MediaStreamDestination.
+ *
+ * Receives base64-encoded MP3 data, decodes it to PCM using
+ * AudioContext.decodeAudioData(), and queues it for sequential playback
+ * via AudioBufferSourceNode.
+ *
+ * @param {string} base64Mp3 - Base64-encoded MP3 audio data
+ * @returns {Promise<{success: boolean, duration?: number, error?: string}>}
+ */
+window.playTranslatedAudio = async function (base64Mp3) {
+  const playbackStartTime = performance.now();
+
+  const audio = window.__translatorAudio;
+  if (!audio || !audio.audioContext || !audio.mediaStreamDestination) {
+    return { success: false, error: "Audio infrastructure not ready" };
+  }
+
+  try {
+    // Step 1: Decode base64 to ArrayBuffer
+    const binaryString = atob(base64Mp3);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    // Step 2: Decode MP3 to AudioBuffer (handles sample rate conversion)
+    const audioBuffer = await audio.audioContext.decodeAudioData(bytes.buffer);
+
+    const decodeLatencyMs = performance.now() - playbackStartTime;
+    console.log("[Bot] MP3 decoded:", {
+      duration: audioBuffer.duration.toFixed(2) + "s",
+      sampleRate: audioBuffer.sampleRate,
+      channels: audioBuffer.numberOfChannels,
+      decodeLatencyMs: decodeLatencyMs.toFixed(1),
+    });
+
+    // Step 3: Queue for sequential playback
+    queueAudioPlayback(audioBuffer);
+
+    return { success: true, duration: audioBuffer.duration };
+  } catch (error) {
+    console.error("[Bot] Failed to decode/play translated audio:", error);
+    return { success: false, error: error.message || String(error) };
+  }
+};
+
+/**
+ * Plays translated MP3 audio by fetching it from a local HTTP URL.
+ *
+ * This avoids the "Base64 Puppeteer Tax" — instead of receiving base64-encoded
+ * audio over CDP WebSocket and decoding in the browser, the browser fetches
+ * the binary MP3 directly from BotPageServer (http://localhost:3001/tts/:id).
+ *
+ * @param {string} audioUrl - Local HTTP URL to fetch the MP3 from
+ * @returns {Promise<{success: boolean, duration?: number, error?: string}>}
+ */
+window.playTranslatedAudioFromUrl = async function (audioUrl) {
+  const audio = window.__translatorAudio;
+  if (!audio || !audio.audioContext || !audio.mediaStreamDestination) {
+    return { success: false, error: "Audio infrastructure not ready" };
+  }
+
+  try {
+    const response = await fetch(audioUrl);
+    if (!response.ok) {
+      return { success: false, error: "Fetch failed: " + response.status };
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await audio.audioContext.decodeAudioData(arrayBuffer);
+
+    console.log("[Bot] MP3 fetched and decoded from URL:", {
+      url: audioUrl,
+      duration: audioBuffer.duration.toFixed(2) + "s",
+      sampleRate: audioBuffer.sampleRate,
+      channels: audioBuffer.numberOfChannels,
+    });
+
+    queueAudioPlayback(audioBuffer);
+    return { success: true, duration: audioBuffer.duration };
+  } catch (error) {
+    console.error("[Bot] Failed to fetch/decode translated audio:", error);
+    return { success: false, error: error.message || String(error) };
+  }
+};
+
+/**
+ * Queues an AudioBuffer for sequential playback.
+ * Drops oldest item if queue exceeds MAX_PLAYBACK_QUEUE.
+ */
+function queueAudioPlayback(audioBuffer) {
+  // Drop oldest if queue is full
+  if (playbackQueue.length >= MAX_PLAYBACK_QUEUE) {
+    const dropped = playbackQueue.shift();
+    console.log(
+      "[Bot] Playback queue full, dropped oldest item. Duration:",
+      dropped.duration.toFixed(2) + "s",
+    );
+  }
+
+  playbackQueue.push(audioBuffer);
+  console.log(
+    "[Bot] Queued audio for playback. Queue length:",
+    playbackQueue.length,
+  );
+
+  // Start playback if not already playing
+  if (!isPlaying) {
+    playNext();
+  }
+}
+
+/**
+ * Plays the next AudioBuffer in the queue.
+ * Uses AudioBufferSourceNode connected to MediaStreamDestination.
+ */
+function playNext() {
+  if (playbackQueue.length === 0) {
+    isPlaying = false;
+    console.log("[Bot] Playback queue empty, stopping");
+    return;
+  }
+
+  isPlaying = true;
+  const audioBuffer = playbackQueue.shift();
+
+  const audio = window.__translatorAudio;
+  if (!audio || !audio.audioContext || !audio.mediaStreamDestination) {
+    console.error("[Bot] Audio infrastructure gone during playback");
+    isPlaying = false;
+    return;
+  }
+
+  try {
+    const source = audio.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+
+    // Connect to MediaStreamDestination (NOT to speakers)
+    // This feeds audio into the local track that subscribers receive
+    source.connect(audio.mediaStreamDestination);
+
+    source.onended = function () {
+      console.log(
+        "[Bot] Playback chunk finished. Remaining in queue:",
+        playbackQueue.length,
+      );
+      playNext();
+    };
+
+    source.start(0);
+    console.log(
+      "[Bot] Playing translated audio chunk. Duration:",
+      audioBuffer.duration.toFixed(2) + "s",
+    );
+  } catch (error) {
+    console.error("[Bot] Error during audio playback:", error);
+    isPlaying = false;
+    // Try next item
+    if (playbackQueue.length > 0) {
+      playNext();
+    }
+  }
+}
+
+/**
+ * Returns playback health information for Node.js health checks.
+ */
+window.getPlaybackHealth = function () {
+  const audio = window.__translatorAudio;
+  const destStream =
+    audio && audio.mediaStreamDestination
+      ? audio.mediaStreamDestination.stream
+      : null;
+
+  return {
+    trackPublished: localAudioTrack !== null,
+    trackMuted: localAudioTrack ? localAudioTrack.isMuted() : true,
+    destinationActive: destStream ? destStream.active : false,
+    destinationTrackCount: destStream ? destStream.getAudioTracks().length : 0,
+    queueLength: playbackQueue.length,
+    isPlaying: isPlaying,
+  };
+};

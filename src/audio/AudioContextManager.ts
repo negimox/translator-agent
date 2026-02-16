@@ -225,6 +225,13 @@ export interface AudioHealth {
   contextState: "suspended" | "running" | "closed";
   captureActive: boolean;
   outputActive: boolean;
+  playback: {
+    trackPublished: boolean;
+    trackMuted: boolean;
+    destinationActive: boolean;
+    queueLength: number;
+    isPlaying: boolean;
+  };
 }
 
 /**
@@ -549,6 +556,131 @@ export class AudioManager {
   }
 
   /**
+   * Publishes the translated audio track to the Jitsi conference (Phase 5).
+   *
+   * Calls the browser-side publishTranslatedAudioTrack() which:
+   * 1. Overrides getUserMedia to return MediaStreamDestination's stream
+   * 2. Creates a JitsiLocalTrack via JitsiMeetJS.createLocalTracks()
+   * 3. Adds the track to the room via room.addTrack()
+   *
+   * Must be called after initialize() and after the room is joined.
+   */
+  async publishLocalTrack(): Promise<void> {
+    logger.info("Publishing local audio track for translated audio");
+
+    const result = await this.page.evaluate(async () => {
+      if (typeof (window as any).publishTranslatedAudioTrack === "function") {
+        return await (window as any).publishTranslatedAudioTrack();
+      }
+      return {
+        success: false,
+        error: "publishTranslatedAudioTrack not available",
+      };
+    });
+
+    if (result.success) {
+      logger.info("Local audio track published successfully");
+    } else {
+      logger.error("Failed to publish local audio track", {
+        error: result.error,
+      });
+      throw new Error(`Failed to publish local audio track: ${result.error}`);
+    }
+  }
+
+  /**
+   * Plays TTS MP3 audio through the MediaStreamDestination (Phase 5).
+   *
+   * Sends the MP3 ArrayBuffer to the browser as base64, where it's decoded
+   * to PCM using AudioContext.decodeAudioData() and played via
+   * AudioBufferSourceNode → MediaStreamDestination → JitsiLocalTrack.
+   */
+  async playMp3Audio(mp3Buffer: ArrayBuffer): Promise<void> {
+    const base64Data = Buffer.from(mp3Buffer).toString("base64");
+
+    logger.debug("Sending MP3 audio to browser for playback", {
+      mp3Size: mp3Buffer.byteLength,
+      base64Length: base64Data.length,
+    });
+
+    const result = await this.page.evaluate(async (base64: string) => {
+      if (typeof (window as any).playTranslatedAudio === "function") {
+        return await (window as any).playTranslatedAudio(base64);
+      }
+      return { success: false, error: "playTranslatedAudio not available" };
+    }, base64Data);
+
+    if (result.success) {
+      logger.info("MP3 audio queued for playback", {
+        duration: result.duration?.toFixed(2) + "s",
+      });
+    } else {
+      logger.error("Failed to play MP3 audio", { error: result.error });
+      throw new Error(`Failed to play MP3 audio: ${result.error}`);
+    }
+  }
+
+  /**
+   * Plays TTS MP3 audio by passing a URL to the browser (Phase 5).
+   *
+   * Instead of base64-encoding the audio and sending it over CDP,
+   * the audio is pre-stored in BotPageServer and the browser fetches
+   * the binary MP3 directly via HTTP from localhost.
+   */
+  async playMp3AudioFromUrl(audioUrl: string): Promise<void> {
+    logger.debug("Sending audio URL to browser for playback", { audioUrl });
+
+    const result = await this.page.evaluate(async (url: string) => {
+      if (typeof (window as any).playTranslatedAudioFromUrl === "function") {
+        return await (window as any).playTranslatedAudioFromUrl(url);
+      }
+      return {
+        success: false,
+        error: "playTranslatedAudioFromUrl not available",
+      };
+    }, audioUrl);
+
+    if (result.success) {
+      logger.info("MP3 audio fetched and queued for playback", {
+        duration: result.duration?.toFixed(2) + "s",
+      });
+    } else {
+      logger.error("Failed to play MP3 audio from URL", {
+        error: result.error,
+      });
+      throw new Error(`Failed to play MP3 audio: ${result.error}`);
+    }
+  }
+
+  /**
+   * Gets the playback health status from the browser (Phase 5).
+   */
+  async getPlaybackHealth(): Promise<AudioHealth["playback"]> {
+    if (!this.initialized) {
+      return {
+        trackPublished: false,
+        trackMuted: true,
+        destinationActive: false,
+        queueLength: 0,
+        isPlaying: false,
+      };
+    }
+
+    return await this.page.evaluate(() => {
+      if (typeof (window as any).getPlaybackHealth === "function") {
+        return (window as any).getPlaybackHealth();
+      }
+      return {
+        trackPublished: false,
+        trackMuted: true,
+        destinationActive: false,
+        queueLength: 0,
+        isPlaying: false,
+      };
+    });
+  }
+
+  /**
    * Reinitializes the audio infrastructure (called on heartbeat timeout).
    */
   async reinitialize(): Promise<void> {
@@ -569,19 +701,34 @@ export class AudioManager {
         contextState: "closed",
         captureActive: false,
         outputActive: false,
+        playback: {
+          trackPublished: false,
+          trackMuted: true,
+          destinationActive: false,
+          queueLength: 0,
+          isPlaying: false,
+        },
       };
     }
 
-    return await this.page.evaluate(() => {
-      const audio = (window as any).__translatorAudio;
-      return {
-        contextState: audio?.audioContext?.state || "closed",
-        captureActive: audio?.captureWorklet !== null,
-        outputActive:
-          audio?.outputWorklet !== null &&
-          audio?.mediaStreamDestination !== null,
-      };
-    });
+    const [audioState, playbackHealth] = await Promise.all([
+      this.page.evaluate(() => {
+        const audio = (window as any).__translatorAudio;
+        return {
+          contextState: audio?.audioContext?.state || "closed",
+          captureActive: audio?.captureWorklet !== null,
+          outputActive:
+            audio?.outputWorklet !== null &&
+            audio?.mediaStreamDestination !== null,
+        };
+      }),
+      this.getPlaybackHealth(),
+    ]);
+
+    return {
+      ...audioState,
+      playback: playbackHealth,
+    };
   }
 
   /**

@@ -432,11 +432,16 @@ export class TranslationPipeline extends EventEmitter {
       // Mark as failed in queue
       this.queue.markFailed(chunk.chunkId, false);
 
-      // Record failure in circuit breaker
-      this.circuitBreaker.recordFailure();
-
       const errorMessage =
         error instanceof Error ? error.message : String(error);
+
+      // Only penalize circuit breaker for actual API failures,
+      // not for empty content results (which are content issues, not API issues)
+      const isContentError =
+        error instanceof Error && error.message.startsWith("Empty ");
+      if (!isContentError) {
+        this.circuitBreaker.recordFailure();
+      }
 
       // Emit failure result
       const pipelineResult: PipelineResult = {
@@ -654,6 +659,11 @@ export class TranslationPipeline extends EventEmitter {
       return error.retryable;
     }
     if (error instanceof CircuitOpenError) {
+      return false;
+    }
+    // Empty transcription/translation results are not retryable -
+    // resending the same audio will produce the same empty result
+    if (error instanceof Error && error.message.startsWith("Empty ")) {
       return false;
     }
     // Network errors are generally retryable

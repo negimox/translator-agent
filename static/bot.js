@@ -1097,53 +1097,6 @@ window.publishTranslatedAudioTrack = async function () {
 };
 
 /**
- * Plays translated MP3 audio through the MediaStreamDestination.
- *
- * Receives base64-encoded MP3 data, decodes it to PCM using
- * AudioContext.decodeAudioData(), and queues it for sequential playback
- * via AudioBufferSourceNode.
- *
- * @param {string} base64Mp3 - Base64-encoded MP3 audio data
- * @returns {Promise<{success: boolean, duration?: number, error?: string}>}
- */
-window.playTranslatedAudio = async function (base64Mp3) {
-  const playbackStartTime = performance.now();
-
-  const audio = window.__translatorAudio;
-  if (!audio || !audio.audioContext || !audio.mediaStreamDestination) {
-    return { success: false, error: "Audio infrastructure not ready" };
-  }
-
-  try {
-    // Step 1: Decode base64 to ArrayBuffer
-    const binaryString = atob(base64Mp3);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    // Step 2: Decode MP3 to AudioBuffer (handles sample rate conversion)
-    const audioBuffer = await audio.audioContext.decodeAudioData(bytes.buffer);
-
-    const decodeLatencyMs = performance.now() - playbackStartTime;
-    console.log("[Bot] MP3 decoded:", {
-      duration: audioBuffer.duration.toFixed(2) + "s",
-      sampleRate: audioBuffer.sampleRate,
-      channels: audioBuffer.numberOfChannels,
-      decodeLatencyMs: decodeLatencyMs.toFixed(1),
-    });
-
-    // Step 3: Queue for sequential playback
-    queueAudioPlayback(audioBuffer);
-
-    return { success: true, duration: audioBuffer.duration };
-  } catch (error) {
-    console.error("[Bot] Failed to decode/play translated audio:", error);
-    return { success: false, error: error.message || String(error) };
-  }
-};
-
-/**
  * Plays translated MP3 audio by fetching it from a local HTTP URL.
  *
  * This avoids the "Base64 Puppeteer Tax" — instead of receiving base64-encoded

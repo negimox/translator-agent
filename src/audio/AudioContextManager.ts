@@ -171,54 +171,6 @@ registerProcessor('translator-audio-processor', TranslatorAudioProcessor);
 `;
 
 /**
- * AudioWorklet processor for output (TTS playback).
- * Takes audio data from main thread and plays it out.
- */
-const OUTPUT_WORKLET_CODE = `
-class TranslatorOutputProcessor extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        this.buffer = [];
-        this.isPlaying = false;
-        
-        this.port.onmessage = (event) => {
-            if (event.data.type === 'audioData') {
-                this.buffer.push(...event.data.samples);
-            } else if (event.data.type === 'clear') {
-                this.buffer = [];
-            }
-        };
-    }
-
-    process(inputs, outputs, parameters) {
-        const output = outputs[0];
-        
-        if (output && output[0]) {
-            const outputChannel = output[0];
-            const samplesToPlay = Math.min(this.buffer.length, outputChannel.length);
-            
-            if (samplesToPlay > 0) {
-                for (let i = 0; i < samplesToPlay; i++) {
-                    outputChannel[i] = this.buffer.shift();
-                }
-                // Fill the rest with silence
-                for (let i = samplesToPlay; i < outputChannel.length; i++) {
-                    outputChannel[i] = 0;
-                }
-            } else {
-                // Silence
-                outputChannel.fill(0);
-            }
-        }
-        
-        return true;
-    }
-}
-
-registerProcessor('translator-output-processor', TranslatorOutputProcessor);
-`;
-
-/**
  * Health status of the audio infrastructure.
  */
 export interface AudioHealth {
@@ -263,7 +215,6 @@ export class AudioManager {
     await this.page.evaluate(
       async (
         workletCode: string,
-        outputWorkletCode: string,
         heartbeatIntervalMs: number,
         vadOptions: { rmsThreshold: number; vadSmoothingFrames: number },
       ) => {
@@ -271,7 +222,6 @@ export class AudioManager {
         (window as any).__translatorAudio = {
           audioContext: null,
           captureWorklet: null,
-          outputWorklet: null,
           mediaStreamDestination: null,
           captureSource: null,
           analyser: null,
@@ -314,15 +264,7 @@ export class AudioManager {
         await audio.audioContext.audioWorklet.addModule(captureWorkletUrl);
         console.log("[AudioManager] Capture AudioWorklet module loaded");
 
-        // Step 5: Load output worklet
-        const outputWorkletBlob = new Blob([outputWorkletCode], {
-          type: "application/javascript",
-        });
-        const outputWorkletUrl = URL.createObjectURL(outputWorkletBlob);
-        await audio.audioContext.audioWorklet.addModule(outputWorkletUrl);
-        console.log("[AudioManager] Output AudioWorklet module loaded");
-
-        // Step 6: Create capture worklet node with VAD parameters (Phase 3)
+        // Step 5: Create capture worklet node with VAD parameters (Phase 3)
         audio.captureWorklet = new AudioWorkletNode(
           audio.audioContext,
           "translator-audio-processor",
@@ -335,17 +277,7 @@ export class AudioManager {
           vadOptions,
         );
 
-        // Step 7: Create output worklet node and connect to destination
-        audio.outputWorklet = new AudioWorkletNode(
-          audio.audioContext,
-          "translator-output-processor",
-        );
-        audio.outputWorklet.connect(audio.mediaStreamDestination);
-        console.log(
-          "[AudioManager] Output AudioWorkletNode created and connected",
-        );
-
-        // Step 8: Set up message listener for heartbeat and audio data
+        // Step 6: Set up message listener for heartbeat and audio data
         audio.captureWorklet.port.onmessage = (event: MessageEvent) => {
           if (event.data.type === "heartbeat") {
             audio.lastHeartbeat = Date.now();
@@ -375,7 +307,7 @@ export class AudioManager {
           }
         };
 
-        // Step 9: Analyser for monitoring (optional but useful for debugging)
+        // Step 7: Analyser for monitoring (optional but useful for debugging)
         audio.analyser = audio.audioContext.createAnalyser();
         audio.analyser.fftSize = 256;
 
@@ -384,7 +316,6 @@ export class AudioManager {
         );
       },
       AUDIO_WORKLET_CODE,
-      OUTPUT_WORKLET_CODE,
       this.config.workletHeartbeatIntervalMs,
       vadConfig,
     );
@@ -489,73 +420,6 @@ export class AudioManager {
   }
 
   /**
-   * Connects to incoming audio from the meeting.
-   * Call this after joining the meeting to capture remote participants' audio.
-   */
-  async connectToMeetingAudio(): Promise<void> {
-    logger.info("Connecting to meeting audio");
-
-    await this.page.evaluate(() => {
-      const audio = (window as any).__translatorAudio;
-      if (!audio || !audio.audioContext || !audio.captureWorklet) {
-        throw new Error("Audio infrastructure not initialized");
-      }
-
-      // Find all remote audio elements
-      const remoteAudioElements = document.querySelectorAll(
-        'audio[id^="remoteaudio_"]',
-      );
-      console.log(
-        "[AudioManager] Found remote audio elements:",
-        remoteAudioElements.length,
-      );
-
-      // Create MediaStreamSource for each and connect to capture worklet
-      audio.remoteSources = [];
-      remoteAudioElements.forEach((audioElement) => {
-        const stream = (audioElement as HTMLAudioElement)
-          .srcObject as MediaStream;
-        if (stream) {
-          const source = audio.audioContext.createMediaStreamSource(stream);
-          source.connect(audio.captureWorklet);
-          source.connect(audio.analyser); // For monitoring
-          audio.remoteSources.push(source);
-          console.log("[AudioManager] Connected remote audio source");
-        }
-      });
-    });
-
-    logger.info("Connected to meeting audio");
-  }
-
-  /**
-   * Gets the audio track that should be published to the meeting.
-   */
-  async getOutputMediaStream(): Promise<void> {
-    // The MediaStreamDestination track is available in the browser
-    // Jitsi will need to use this track as the agent's audio
-    logger.info(
-      "Output MediaStream is available via __translatorAudio.mediaStreamDestination.stream",
-    );
-  }
-
-  /**
-   * Plays audio data through the output worklet.
-   * This is used for TTS playback in Phase 5.
-   */
-  async playAudio(samples: Float32Array): Promise<void> {
-    await this.page.evaluate((samplesArray: number[]) => {
-      const audio = (window as any).__translatorAudio;
-      if (audio?.outputWorklet) {
-        audio.outputWorklet.port.postMessage({
-          type: "audioData",
-          samples: samplesArray,
-        });
-      }
-    }, Array.from(samples));
-  }
-
-  /**
    * Publishes the translated audio track to the Jitsi conference (Phase 5).
    *
    * Calls the browser-side publishTranslatedAudioTrack() which:
@@ -585,38 +449,6 @@ export class AudioManager {
         error: result.error,
       });
       throw new Error(`Failed to publish local audio track: ${result.error}`);
-    }
-  }
-
-  /**
-   * Plays TTS MP3 audio through the MediaStreamDestination (Phase 5).
-   *
-   * Sends the MP3 ArrayBuffer to the browser as base64, where it's decoded
-   * to PCM using AudioContext.decodeAudioData() and played via
-   * AudioBufferSourceNode → MediaStreamDestination → JitsiLocalTrack.
-   */
-  async playMp3Audio(mp3Buffer: ArrayBuffer): Promise<void> {
-    const base64Data = Buffer.from(mp3Buffer).toString("base64");
-
-    logger.debug("Sending MP3 audio to browser for playback", {
-      mp3Size: mp3Buffer.byteLength,
-      base64Length: base64Data.length,
-    });
-
-    const result = await this.page.evaluate(async (base64: string) => {
-      if (typeof (window as any).playTranslatedAudio === "function") {
-        return await (window as any).playTranslatedAudio(base64);
-      }
-      return { success: false, error: "playTranslatedAudio not available" };
-    }, base64Data);
-
-    if (result.success) {
-      logger.info("MP3 audio queued for playback", {
-        duration: result.duration?.toFixed(2) + "s",
-      });
-    } else {
-      logger.error("Failed to play MP3 audio", { error: result.error });
-      throw new Error(`Failed to play MP3 audio: ${result.error}`);
     }
   }
 
@@ -717,9 +549,7 @@ export class AudioManager {
         return {
           contextState: audio?.audioContext?.state || "closed",
           captureActive: audio?.captureWorklet !== null,
-          outputActive:
-            audio?.outputWorklet !== null &&
-            audio?.mediaStreamDestination !== null,
+          outputActive: audio?.mediaStreamDestination !== null,
         };
       }),
       this.getPlaybackHealth(),
@@ -742,9 +572,6 @@ export class AudioManager {
       if (audio) {
         if (audio.captureWorklet) {
           audio.captureWorklet.disconnect();
-        }
-        if (audio.outputWorklet) {
-          audio.outputWorklet.disconnect();
         }
         if (audio.remoteSources) {
           audio.remoteSources.forEach((source: AudioNode) =>

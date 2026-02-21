@@ -18,7 +18,7 @@ import { Page } from "puppeteer";
 import { AgentConfig, getDisplayName, getMeetingUrl } from "../config";
 import { createLogger } from "../logger";
 import { ChromeInstance, launchChrome, isChromeLive } from "./ChromeLauncher";
-import { AudioManager, AudioHealth } from "../audio/AudioContextManager";
+import { AudioManager } from "../audio/AudioContextManager";
 import { HeartbeatMonitor } from "../audio/HeartbeatMonitor";
 import { AudioBridge, AudioChunk } from "../audio/AudioBridge";
 import { JitsiConnection } from "../meeting/JitsiConnection";
@@ -32,11 +32,6 @@ import {
 } from "../mizan";
 
 const logger = createLogger("TranslatorAgent");
-
-/**
- * Bot page server port.
- */
-const BOT_PAGE_PORT = 3001;
 
 /**
  * Agent lifecycle states.
@@ -120,7 +115,7 @@ export class TranslatorAgent {
     try {
       // Step 1: Start bot page server
       logger.info("Step 1: Starting bot page server");
-      this.botPageServer = new BotPageServer(BOT_PAGE_PORT);
+      this.botPageServer = new BotPageServer(this.config.botPagePort);
       await this.botPageServer.start();
 
       // Step 2: Launch Chrome
@@ -439,6 +434,14 @@ export class TranslatorAgent {
           );
         }
 
+        // Reconnect existing participants' audio to the new worklet
+        const connectionResult =
+          await this.audioManager.connectExistingParticipants();
+        logger.info(
+          "Reconnected existing participants after heartbeat recovery",
+          connectionResult,
+        );
+
         logger.info("Audio infrastructure reinitialized successfully");
       } catch (error) {
         logger.error("Failed to reinitialize audio", { error: String(error) });
@@ -523,27 +526,10 @@ export class TranslatorAgent {
   /**
    * Gets the current health status of the agent.
    */
-  getHealth(): AgentHealthState {
+  async getHealth(): Promise<AgentHealthState> {
     const chromeHealthy = this.chrome !== null && isChromeLive(this.chrome);
-    // Note: audioManager.getHealth() is async but we use cached values here
-    // for sync access. A more robust solution would cache the health state.
-    const audioHealth: AudioHealth = {
-      contextState: "closed",
-      captureActive: false,
-      outputActive: false,
-      playback: {
-        trackPublished: false,
-        trackMuted: true,
-        destinationActive: false,
-        queueLength: 0,
-        isPlaying: false,
-      },
-    };
     const heartbeatHealthy = this.heartbeatMonitor?.isHealthy() ?? false;
     const meetingConnected = this.jitsiConnection?.isConnected() ?? false;
-
-    // For immediate health checks, we assume audio is healthy if manager exists
-    const audioReady = this.audioManager !== null;
 
     // Phase 3: Check audio bridge health
     const audioBridgeRunning = this.audioBridge !== null;
@@ -551,9 +537,28 @@ export class TranslatorAgent {
     // Phase 4: Check pipeline health
     const pipelineHealthy = this.translationPipeline?.isHealthy() ?? true;
 
+    // Query real audio state from browser (async)
+    let audioContextState: "suspended" | "running" | "closed" = "closed";
+    let captureActive = false;
+    let outputActive = false;
+
+    if (this.audioManager) {
+      try {
+        const audioHealth = await this.audioManager.getHealth();
+        audioContextState = audioHealth.contextState;
+        captureActive = audioHealth.captureActive && audioBridgeRunning;
+        outputActive = audioHealth.outputActive;
+      } catch {
+        // Browser may not be available — use fallback
+        audioContextState = this.audioManager !== null ? "running" : "closed";
+        captureActive = this.audioManager !== null && audioBridgeRunning;
+        outputActive = this.audioManager !== null;
+      }
+    }
+
     const isHealthy =
       chromeHealthy &&
-      audioReady &&
+      audioContextState === "running" &&
       heartbeatHealthy &&
       meetingConnected &&
       pipelineHealthy;
@@ -562,9 +567,9 @@ export class TranslatorAgent {
       state: this.state,
       healthy: isHealthy,
       chrome: chromeHealthy,
-      audioContext: audioReady ? "running" : "closed",
-      captureActive: audioReady && audioBridgeRunning,
-      outputActive: audioReady,
+      audioContext: audioContextState,
+      captureActive,
+      outputActive,
       heartbeatHealthy,
       meetingConnected,
       pipelineHealthy,

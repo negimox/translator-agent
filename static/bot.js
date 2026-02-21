@@ -26,6 +26,13 @@ const botConfig = {
   displayName: urlParams.get("displayName") || "translator-bot",
 };
 
+// Parse the target language from the display name (e.g., "translator-hi" -> "hi")
+// This is the language the bot translates TO. Used for self-echo prevention:
+// participants who speak this language should be excluded from audio capture.
+const botTargetLanguage = botConfig.displayName.startsWith("translator-")
+  ? botConfig.displayName.replace("translator-", "")
+  : null;
+
 // Options merged with server config
 // Note: p2p disabled to force all traffic through JVB (avoids STUN/TURN issues)
 let options = {
@@ -122,6 +129,19 @@ function initRoom() {
   console.log("[Bot] Initializing conference:", botConfig.roomName);
   room = connection.initJitsiConference(botConfig.roomName, options);
 
+  // Initialize audio capture maps BEFORE registering event handlers.
+  // PARTICIPANT_PROPERTY_CHANGED and USER_JOINED fire during the join
+  // handshake (before CONFERENCE_JOINED), so these must exist early.
+  if (!window.__audioSources) {
+    window.__audioSources = new Map();
+  }
+  if (!window.__excludedParticipants) {
+    window.__excludedParticipants = new Set();
+  }
+  if (!window.__participantLanguages) {
+    window.__participantLanguages = new Map();
+  }
+
   // Conference events
   room.on(JitsiMeetJS.events.conference.CONFERENCE_JOINED, onConferenceJoined);
   room.on(JitsiMeetJS.events.conference.CONFERENCE_LEFT, onConferenceLeft);
@@ -171,6 +191,80 @@ function initRoom() {
     },
   );
 
+  // Self-echo prevention: Listen for participant property changes to track spoken languages.
+  // When a participant sets their spokenLanguage (via the frontend's Spoken Language selector),
+  // the bot updates its audio subscription to exclude participants whose language matches
+  // the bot's target language (no point translating X->X, and prevents self-echo).
+  //
+  // Defense-in-depth: Also disconnects/reconnects the WebAudio capture source when
+  // a participant's language changes, so even if JVB subscription filtering fails,
+  // the capture worklet won't receive audio from same-language participants.
+  room.on(
+    JitsiMeetJS.events.conference.PARTICIPANT_PROPERTY_CHANGED,
+    (participant, propertyName, oldValue, newValue) => {
+      if (propertyName === "spokenLanguage") {
+        const participantId = participant.getId();
+        const displayName = participant.getDisplayName();
+        console.log(
+          "[Bot] PARTICIPANT_PROPERTY_CHANGED: spokenLanguage for",
+          displayName || participantId,
+          "changed from",
+          oldValue,
+          "to",
+          newValue,
+        );
+        if (newValue) {
+          window.__participantLanguages.set(participantId, newValue);
+        } else {
+          window.__participantLanguages.delete(participantId);
+        }
+
+        // Defense-in-depth: Manage WebAudio capture connections based on language.
+        // If participant's language now matches bot's target, disconnect their audio.
+        // If it no longer matches (changed language), reconnect their audio.
+        if (botTargetLanguage && !isTranslatorParticipant(displayName)) {
+          const nowSameLanguage = newValue === botTargetLanguage;
+          const wasSameLanguage = oldValue === botTargetLanguage;
+          const isConnected =
+            window.__audioSources && window.__audioSources.has(participantId);
+
+          if (nowSameLanguage && isConnected) {
+            console.log(
+              "[Bot] Disconnecting same-language participant from capture:",
+              displayName || participantId,
+              "(lang:",
+              newValue,
+              "= botTarget:",
+              botTargetLanguage,
+              ")",
+            );
+            disconnectParticipantAudio(participantId);
+          } else if (!nowSameLanguage && wasSameLanguage && !isConnected) {
+            console.log(
+              "[Bot] Reconnecting participant after language change:",
+              displayName || participantId,
+              "(lang:",
+              newValue,
+              "!= botTarget:",
+              botTargetLanguage,
+              ")",
+            );
+            connectParticipantAudio(participant);
+          }
+        }
+
+        updateBotAudioSubscription();
+      }
+    },
+  );
+
+  // Re-send audio subscription when data channel opens, in case the initial
+  // call during CONFERENCE_JOINED was silently dropped (channel not yet open).
+  room.on(JitsiMeetJS.events.conference.DATA_CHANNEL_OPENED, () => {
+    console.log("[Bot] DATA_CHANNEL_OPENED, re-sending audio subscription");
+    updateBotAudioSubscription();
+  });
+
   // Set display name and join
   room.setDisplayName(botConfig.displayName);
   room.join();
@@ -192,24 +286,33 @@ function onConferenceJoined() {
   console.log("[Bot] My participant ID:", room.myUserId());
   console.log("[Bot] Participants:", room.getParticipants().length);
 
-  // Phase 3: Initialize audio capture maps (but don't connect yet - wait for AudioManager)
-  // The actual connection will happen when connectAllParticipantAudio() is called
-  // from Node.js after the audio infrastructure is ready
-  if (!window.__audioSources) {
-    window.__audioSources = new Map();
-  }
-  if (!window.__excludedParticipants) {
-    window.__excludedParticipants = new Set();
-  }
-
-  // Mark excluded participants (translators)
+  // Mark excluded participants (translators) and read spoken language properties
   room.getParticipants().forEach((participant) => {
     const displayName = participant.getDisplayName();
+    const participantId = participant.getId();
+
     if (isTranslatorParticipant(displayName)) {
       console.log("[Bot] Marking translator for exclusion:", displayName);
-      window.__excludedParticipants.add(participant.getId());
+      window.__excludedParticipants.add(participantId);
+    }
+
+    // Read initial spokenLanguage property (set before bot joined)
+    const spokenLang = participant.getProperty
+      ? participant.getProperty("spokenLanguage")
+      : null;
+    if (spokenLang) {
+      console.log(
+        "[Bot] Initial spokenLanguage for",
+        displayName || participantId,
+        ":",
+        spokenLang,
+      );
+      window.__participantLanguages.set(participantId, spokenLang);
     }
   });
+
+  // Apply initial audio subscription based on known participant languages
+  updateBotAudioSubscription();
 
   console.log(
     "[Bot] Conference joined, waiting for audio infrastructure from Node.js...",
@@ -263,9 +366,41 @@ function onUserJoined(id, user) {
     }
     window.__excludedParticipants.add(id);
   } else {
-    // Connect to this participant's audio
-    connectParticipantAudio(user);
+    // Read spoken language property if available
+    const spokenLang = user.getProperty
+      ? user.getProperty("spokenLanguage")
+      : null;
+    if (spokenLang) {
+      console.log(
+        "[Bot] New participant spokenLanguage:",
+        displayName || id,
+        ":",
+        spokenLang,
+      );
+      if (!window.__participantLanguages) {
+        window.__participantLanguages = new Map();
+      }
+      window.__participantLanguages.set(id, spokenLang);
+    }
+
+    // Defense-in-depth: Don't connect audio if participant's language matches bot's target
+    if (isSameLanguageParticipant(id)) {
+      console.log(
+        "[Bot] Skipping audio connection for same-language participant:",
+        displayName || id,
+        "lang:",
+        spokenLang,
+        "botTarget:",
+        botTargetLanguage,
+      );
+    } else {
+      // Connect to this participant's audio
+      connectParticipantAudio(user);
+    }
   }
+
+  // Update audio subscription (new participant may affect exclusion list)
+  updateBotAudioSubscription();
 
   // Log current participant count
   if (room) {
@@ -284,8 +419,16 @@ function onUserLeft(id, user) {
     window.__excludedParticipants.delete(id);
   }
 
+  // Remove from language tracking
+  if (window.__participantLanguages) {
+    window.__participantLanguages.delete(id);
+  }
+
   // Disconnect their audio
   disconnectParticipantAudio(id);
+
+  // Update audio subscription (removed participant may change exclusion list)
+  updateBotAudioSubscription();
 }
 
 /**
@@ -344,6 +487,101 @@ function isTranslatorParticipant(displayName) {
 }
 
 /**
+ * Checks if a participant should be excluded from audio capture based on their
+ * spoken language matching the bot's target language.
+ *
+ * Defense-in-depth: This supplements JVB-level exclusion (updateBotAudioSubscription)
+ * with WebAudio-level exclusion. Even if JVB subscription filtering fails or hasn't
+ * been applied yet, same-language participants won't be connected to the capture worklet.
+ *
+ * @returns {boolean} true if participant should be excluded
+ */
+function isSameLanguageParticipant(participantId) {
+  if (!botTargetLanguage || !window.__participantLanguages) return false;
+  const lang = window.__participantLanguages.get(participantId);
+  return lang === botTargetLanguage;
+}
+
+/**
+ * Updates the bot's audio subscription via JVB Receiver Audio Subscriptions API.
+ *
+ * Self-echo prevention: Excludes participants whose spokenLanguage matches
+ * the bot's target language. For example, translator-hi (translates TO Hindi)
+ * excludes Hindi speakers because:
+ * 1. Translating Hindi->Hindi is wasteful
+ * 2. Hindi speakers are the subscribers of this translator and would hear self-echo
+ *
+ * Also continues to exclude all translator-* participants (loop prevention).
+ */
+function updateBotAudioSubscription() {
+  if (!room || !roomJoined) {
+    return;
+  }
+
+  // Guard: setAudioSubscriptionMode may not be available
+  if (typeof room.setAudioSubscriptionMode !== "function") {
+    console.log(
+      "[Bot] setAudioSubscriptionMode not available on room object, skipping",
+    );
+    return;
+  }
+
+  const excludeIds = new Set();
+  const exclusionReasons = {};
+
+  // 1. Exclude all translator participants (existing loop prevention)
+  if (window.__excludedParticipants) {
+    window.__excludedParticipants.forEach((id) => {
+      excludeIds.add(id);
+      exclusionReasons[id] = "translator-bot";
+    });
+  }
+
+  // 2. Exclude participants whose spokenLanguage matches bot's target language
+  if (botTargetLanguage && window.__participantLanguages) {
+    window.__participantLanguages.forEach((lang, participantId) => {
+      if (lang === botTargetLanguage) {
+        excludeIds.add(participantId);
+        exclusionReasons[participantId] =
+          (exclusionReasons[participantId] ? exclusionReasons[participantId] + " + " : "") +
+          "same-language (" + lang + "=" + botTargetLanguage + ")";
+      }
+    });
+  }
+
+  // Build source name list ({endpointId}-a0 format required by JVB AudioSubscription)
+  const excludeSources = Array.from(excludeIds).map((id) => `${id}-a0`);
+
+  console.log("[Bot] Audio subscription update details:", {
+    botTargetLanguage,
+    participantLanguages: window.__participantLanguages
+      ? Object.fromEntries(window.__participantLanguages)
+      : {},
+    excludedTranslators: window.__excludedParticipants
+      ? Array.from(window.__excludedParticipants)
+      : [],
+    exclusionReasons,
+    totalExcluded: excludeSources.length,
+  });
+
+  if (excludeSources.length === 0) {
+    console.log("[Bot] Updating audio subscription: mode=All (no exclusions)");
+    room.setAudioSubscriptionMode({ mode: "All" });
+  } else {
+    console.log(
+      "[Bot] Updating audio subscription: mode=Exclude,",
+      excludeSources.length,
+      "source(s):",
+      excludeSources,
+    );
+    room.setAudioSubscriptionMode({
+      mode: "Exclude",
+      list: excludeSources,
+    });
+  }
+}
+
+/**
  * Connects all existing participants' audio tracks.
  * This is called from Node.js AFTER the audio infrastructure is ready.
  * Exposed as window.connectAllParticipantAudio for Puppeteer to call.
@@ -380,6 +618,20 @@ window.connectAllParticipantAudio = function () {
     // Skip translators
     if (isTranslatorParticipant(displayName)) {
       console.log("[Bot] Skipping translator:", displayName);
+      skipped++;
+      return;
+    }
+
+    // Defense-in-depth: Skip same-language participants at WebAudio level
+    if (isSameLanguageParticipant(participantId)) {
+      console.log(
+        "[Bot] Skipping same-language participant (WebAudio filter):",
+        displayName || participantId,
+        "lang:",
+        window.__participantLanguages?.get(participantId),
+        "botTarget:",
+        botTargetLanguage,
+      );
       skipped++;
       return;
     }
@@ -444,6 +696,10 @@ window.getAudioDebugInfo = function () {
     hasCaptureWorklet: !!audio?.captureWorklet,
     connectedSources: window.__audioSources?.size || 0,
     excludedParticipants: window.__excludedParticipants?.size || 0,
+    botTargetLanguage: botTargetLanguage,
+    participantLanguages: window.__participantLanguages
+      ? Object.fromEntries(window.__participantLanguages)
+      : {},
     roomJoined: roomJoined,
     participantCount: room?.getParticipants()?.length || 0,
   };
@@ -589,6 +845,21 @@ function handleAudioTrackAdded(track, participantId) {
     return;
   }
 
+  // Defense-in-depth: check if participant's spoken language matches bot's target language.
+  // This prevents self-echo at the WebAudio capture level, even if JVB subscription
+  // filtering hasn't been applied yet or failed.
+  if (isSameLanguageParticipant(participantId)) {
+    console.log(
+      "[Bot] Excluding same-language participant from audio capture:",
+      participantId,
+      "lang:",
+      window.__participantLanguages?.get(participantId),
+      "botTarget:",
+      botTargetLanguage,
+    );
+    return;
+  }
+
   const audio = window.__translatorAudio;
   console.log("[Bot] Audio infrastructure status:", {
     exists: !!audio,
@@ -715,6 +986,9 @@ function handleAudioTrackAdded(track, participantId) {
         // Update stats
         window.__audioStats = window.__audioStats || { connectedSources: 0 };
         window.__audioStats.connectedSources = window.__audioSources.size;
+
+        // Start audio level monitoring using the SAME source node (avoids duplicate MediaStreamSource leak)
+        startAudioLevelMonitoringFromSource(participantId, source);
       } catch (e) {
         console.error("[Bot] Error connecting to worklet:", e);
       }
@@ -762,8 +1036,6 @@ function handleAudioTrackAdded(track, participantId) {
         connectToWorklet();
       });
 
-    // Start monitoring audio levels
-    startAudioLevelMonitoring(participantId, stream);
   } catch (error) {
     console.error("[Bot] Error connecting audio track:", error);
     console.error("[Bot] Error stack:", error.stack);
@@ -771,18 +1043,19 @@ function handleAudioTrackAdded(track, participantId) {
 }
 
 /**
- * Monitors audio levels from a stream to debug if audio is actually flowing
+ * Monitors audio levels from an existing source node to debug if audio is actually flowing.
+ * Uses the already-created MediaStreamAudioSourceNode to avoid creating a duplicate (memory leak).
  */
-function startAudioLevelMonitoring(participantId, stream) {
+function startAudioLevelMonitoringFromSource(participantId, source) {
   const audio = window.__translatorAudio;
   if (!audio || !audio.audioContext) return;
 
   try {
-    // Create a separate analyser for this stream
+    // Create a separate analyser for this participant
     const analyser = audio.audioContext.createAnalyser();
     analyser.fftSize = 256;
 
-    const source = audio.audioContext.createMediaStreamSource(stream);
+    // Connect the existing source to the analyser (no duplicate createMediaStreamSource)
     source.connect(analyser);
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -811,7 +1084,7 @@ function startAudioLevelMonitoring(participantId, stream) {
       if (rms > 0.01) {
         if (!hasLoggedAudio) {
           console.log(
-            "[Bot] 🔊 AUDIO DETECTED from",
+            "[Bot] AUDIO DETECTED from",
             participantId,
             "RMS:",
             rms.toFixed(4),
@@ -824,7 +1097,7 @@ function startAudioLevelMonitoring(participantId, stream) {
         // Log every 10 seconds of silence
         if (silentFrames % 100 === 0 && silentFrames <= 300) {
           console.log(
-            "[Bot] 🔇 Still silent from",
+            "[Bot] Still silent from",
             participantId,
             "for",
             (silentFrames / 10).toFixed(0),

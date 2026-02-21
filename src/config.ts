@@ -45,6 +45,9 @@ export interface AgentConfig {
   // Health check
   healthPort: number;
 
+  // Bot page server
+  botPagePort: number;
+
   // Puppeteer settings
   chromeHeadless: boolean;
   chromeDevtools: boolean;
@@ -169,6 +172,9 @@ export function loadConfig(): AgentConfig {
 
     // Health check
     healthPort: parseInt(process.env.HEALTH_PORT, 8080),
+
+    // Bot page server
+    botPagePort: parseInt(process.env.BOT_PAGE_PORT, 3001),
 
     // Puppeteer settings
     chromeHeadless: parseBool(process.env.CHROME_HEADLESS, true),

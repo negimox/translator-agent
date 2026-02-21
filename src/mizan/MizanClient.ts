@@ -218,10 +218,10 @@ export class MizanClient {
         asrResult: transcriptionText,
       };
     } catch (error) {
-      this.errorCount++;
       if (error instanceof MizanError) {
         throw error;
       }
+      this.errorCount++;
       throw new MizanError(
         `STT request failed: ${error instanceof Error ? error.message : String(error)}`,
         0,
@@ -278,10 +278,10 @@ export class MizanClient {
         response: data.response,
       };
     } catch (error) {
-      this.errorCount++;
       if (error instanceof MizanError) {
         throw error;
       }
+      this.errorCount++;
       throw new MizanError(
         `Translation request failed: ${error instanceof Error ? error.message : String(error)}`,
         0,
@@ -351,10 +351,10 @@ export class MizanClient {
         contentType,
       };
     } catch (error) {
-      this.errorCount++;
       if (error instanceof MizanError) {
         throw error;
       }
+      this.errorCount++;
       throw new MizanError(
         `TTS request failed: ${error instanceof Error ? error.message : String(error)}`,
         0,
@@ -439,10 +439,10 @@ export class MizanClient {
         totalBytes,
       });
     } catch (error) {
-      this.errorCount++;
       if (error instanceof MizanError) {
         throw error;
       }
+      this.errorCount++;
       throw new MizanError(
         `TTS streaming failed: ${error instanceof Error ? error.message : String(error)}`,
         0,

@@ -5,13 +5,13 @@
  * Restarts agents that fail consecutive health checks.
  */
 
-import * as http from 'http';
-import { createLogger } from '../logger';
-import { OrchestratorConfig } from './OrchestratorConfig';
-import { AgentManager } from './AgentManager';
-import { TrackedAgent } from './types';
+import * as http from "http";
+import { createLogger } from "../logger";
+import { OrchestratorConfig } from "./OrchestratorConfig";
+import { AgentManager } from "./AgentManager";
+import { TrackedAgent } from "./types";
 
-const logger = createLogger('AgentWatchdog');
+const logger = createLogger("AgentWatchdog");
 
 export class AgentWatchdog {
   private config: OrchestratorConfig;
@@ -21,7 +21,7 @@ export class AgentWatchdog {
   constructor(config: OrchestratorConfig, agentManager: AgentManager) {
     this.config = config;
     this.agentManager = agentManager;
-    logger.info('AgentWatchdog initialized');
+    logger.info("AgentWatchdog initialized");
   }
 
   /**
@@ -34,7 +34,7 @@ export class AgentWatchdog {
       this.checkAllAgents();
     }, this.config.healthCheckIntervalMs);
 
-    logger.info('AgentWatchdog started', {
+    logger.info("AgentWatchdog started", {
       intervalMs: this.config.healthCheckIntervalMs,
     });
   }
@@ -47,16 +47,16 @@ export class AgentWatchdog {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
     }
-    logger.info('AgentWatchdog stopped');
+    logger.info("AgentWatchdog stopped");
   }
 
   /**
    * Check health of all running agents.
    */
   private async checkAllAgents(): Promise<void> {
-    const agents = this.agentManager.getAllAgents().filter(
-      a => a.state === 'running'
-    );
+    const agents = this.agentManager
+      .getAllAgents()
+      .filter((a) => a.state === "running");
 
     for (const agent of agents) {
       await this.checkAgent(agent);
@@ -74,12 +74,12 @@ export class AgentWatchdog {
       if (healthy) {
         // Reset failure counter on success
         if (agent.consecutiveHealthFailures > 0) {
-          logger.debug('Agent health restored', { agentId: agent.id });
+          logger.debug("Agent health restored", { agentId: agent.id });
         }
         agent.consecutiveHealthFailures = 0;
       } else {
         agent.consecutiveHealthFailures++;
-        logger.warn('Agent health check failed', {
+        logger.warn("Agent health check failed", {
           agentId: agent.id,
           consecutiveFailures: agent.consecutiveHealthFailures,
         });
@@ -89,7 +89,7 @@ export class AgentWatchdog {
       agent.consecutiveHealthFailures++;
       agent.lastHealthCheck = Date.now();
       const errMsg = error instanceof Error ? error.message : String(error);
-      logger.warn('Agent health check error', {
+      logger.warn("Agent health check error", {
         agentId: agent.id,
         error: errMsg,
         consecutiveFailures: agent.consecutiveHealthFailures,
@@ -108,17 +108,17 @@ export class AgentWatchdog {
 
     // Check restart limits
     if (this.isRestartLimitExceeded(agent)) {
-      logger.error('Agent restart limit exceeded, marking as failed', {
+      logger.error("Agent restart limit exceeded, marking as failed", {
         agentId: agent.id,
         restartCount: agent.restartCount,
         maxRestarts: this.config.maxRestartsPerWindow,
       });
-      agent.state = 'failed';
+      agent.state = "failed";
       return;
     }
 
     // Restart the agent
-    logger.info('Restarting unhealthy agent', {
+    logger.info("Restarting unhealthy agent", {
       agentId: agent.id,
       consecutiveFailures: agent.consecutiveHealthFailures,
     });
@@ -127,7 +127,10 @@ export class AgentWatchdog {
       await this.agentManager.restartAgent(agent.id);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      logger.error('Failed to restart agent', { agentId: agent.id, error: errMsg });
+      logger.error("Failed to restart agent", {
+        agentId: agent.id,
+        error: errMsg,
+      });
     }
   }
 
@@ -137,7 +140,10 @@ export class AgentWatchdog {
   private isRestartLimitExceeded(agent: TrackedAgent): boolean {
     const windowStart = Date.now() - this.config.restartWindowMs;
     // Simple check: if spawnedAt is within the window and restartCount >= max
-    if (agent.spawnedAt > windowStart && agent.restartCount >= this.config.maxRestartsPerWindow) {
+    if (
+      agent.spawnedAt > windowStart &&
+      agent.restartCount >= this.config.maxRestartsPerWindow
+    ) {
       return true;
     }
     return false;
@@ -154,11 +160,11 @@ export class AgentWatchdog {
         (res) => {
           resolve(res.statusCode === 200);
           res.resume(); // Consume response data to free memory
-        }
+        },
       );
 
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => {
+      req.on("error", () => resolve(false));
+      req.on("timeout", () => {
         req.destroy();
         resolve(false);
       });

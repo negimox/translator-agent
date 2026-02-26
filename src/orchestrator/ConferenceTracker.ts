@@ -5,8 +5,8 @@
  * webhook events from Prosody's mod_event_sync_component.
  */
 
-import { EventEmitter } from 'events';
-import { createLogger } from '../logger';
+import { EventEmitter } from "events";
+import { createLogger } from "../logger";
 import {
   TrackedRoom,
   TrackedParticipant,
@@ -15,16 +15,16 @@ import {
   OccupantJoinedEvent,
   OccupantLeftEvent,
   OccupantLanguageChangedEvent,
-} from './types';
+} from "./types";
 
-const logger = createLogger('ConferenceTracker');
+const logger = createLogger("ConferenceTracker");
 
 export class ConferenceTracker extends EventEmitter {
   private rooms: Map<string, TrackedRoom> = new Map();
 
   constructor() {
     super();
-    logger.info('ConferenceTracker initialized');
+    logger.info("ConferenceTracker initialized");
   }
 
   /**
@@ -34,7 +34,7 @@ export class ConferenceTracker extends EventEmitter {
     const { room_name, room_jid, is_breakout, created_at } = event;
 
     if (this.rooms.has(room_name)) {
-      logger.warn('Room already tracked, updating', { roomName: room_name });
+      logger.warn("Room already tracked, updating", { roomName: room_name });
     }
 
     const room: TrackedRoom = {
@@ -46,7 +46,7 @@ export class ConferenceTracker extends EventEmitter {
     };
 
     this.rooms.set(room_name, room);
-    logger.info('Room created', { roomName: room_name, roomJid: room_jid });
+    logger.info("Room created", { roomName: room_name, roomJid: room_jid });
   }
 
   /**
@@ -55,8 +55,8 @@ export class ConferenceTracker extends EventEmitter {
   onRoomDestroyed(event: RoomDestroyedEvent): void {
     const { room_name } = event;
     this.rooms.delete(room_name);
-    logger.info('Room destroyed', { roomName: room_name });
-    this.emit('room-destroyed', { roomName: room_name });
+    logger.info("Room destroyed", { roomName: room_name });
+    this.emit("room-destroyed", { roomName: room_name });
   }
 
   /**
@@ -65,19 +65,11 @@ export class ConferenceTracker extends EventEmitter {
   onOccupantJoined(event: OccupantJoinedEvent): void {
     const { room_name, occupant } = event;
 
-    let room = this.rooms.get(room_name);
-    if (!room) {
-      // Auto-create room if we missed the room-created event (e.g. orchestrator restart)
-      logger.warn('Room not found for occupant join, auto-creating', { roomName: room_name });
-      room = {
-        roomName: room_name,
-        roomJid: event.room_jid,
-        isBreakout: event.is_breakout || false,
-        createdAt: Date.now(),
-        participants: new Map(),
-      };
-      this.rooms.set(room_name, room);
-    }
+    const room = this.ensureRoom(
+      room_name,
+      event.room_jid,
+      event.is_breakout || false,
+    );
 
     const participant: TrackedParticipant = {
       occupantJid: occupant.occupant_jid,
@@ -87,13 +79,13 @@ export class ConferenceTracker extends EventEmitter {
     };
 
     room.participants.set(occupant.occupant_jid, participant);
-    logger.info('Occupant joined', {
+    logger.info("Occupant joined", {
       roomName: room_name,
       occupantJid: occupant.occupant_jid,
       participantCount: room.participants.size,
     });
 
-    this.emit('spawn-evaluation-needed', { roomName: room_name });
+    this.emit("spawn-evaluation-needed", { roomName: room_name });
   }
 
   /**
@@ -104,18 +96,18 @@ export class ConferenceTracker extends EventEmitter {
 
     const room = this.rooms.get(room_name);
     if (!room) {
-      logger.warn('Room not found for occupant leave', { roomName: room_name });
+      logger.warn("Room not found for occupant leave", { roomName: room_name });
       return;
     }
 
     room.participants.delete(occupant.occupant_jid);
-    logger.info('Occupant left', {
+    logger.info("Occupant left", {
       roomName: room_name,
       occupantJid: occupant.occupant_jid,
       participantCount: room.participants.size,
     });
 
-    this.emit('termination-evaluation-needed', { roomName: room_name });
+    this.emit("termination-evaluation-needed", { roomName: room_name });
   }
 
   /**
@@ -124,18 +116,11 @@ export class ConferenceTracker extends EventEmitter {
   onLanguageChanged(event: OccupantLanguageChangedEvent): void {
     const { room_name, occupant } = event;
 
-    let room = this.rooms.get(room_name);
-    if (!room) {
-      logger.warn('Room not found for language change, auto-creating', { roomName: room_name });
-      room = {
-        roomName: room_name,
-        roomJid: event.room_jid,
-        isBreakout: event.is_breakout || false,
-        createdAt: Date.now(),
-        participants: new Map(),
-      };
-      this.rooms.set(room_name, room);
-    }
+    const room = this.ensureRoom(
+      room_name,
+      event.room_jid,
+      event.is_breakout || false,
+    );
 
     let participant = room.participants.get(occupant.occupant_jid);
     if (!participant) {
@@ -155,14 +140,39 @@ export class ConferenceTracker extends EventEmitter {
       participant.displayName = occupant.name;
     }
 
-    logger.info('Occupant language changed', {
+    logger.info("Occupant language changed", {
       roomName: room_name,
       occupantJid: occupant.occupant_jid,
       previousLanguage,
       newLanguage: occupant.spoken_language,
     });
 
-    this.emit('spawn-evaluation-needed', { roomName: room_name });
+    this.emit("spawn-evaluation-needed", { roomName: room_name });
+  }
+
+  /**
+   * Ensures a room exists in the tracker. If not found, auto-creates it.
+   * Handles cases where webhook events arrive for rooms we missed the
+   * room-created event for (e.g., orchestrator restart while conferences are active).
+   */
+  private ensureRoom(
+    roomName: string,
+    roomJid: string,
+    isBreakout: boolean,
+  ): TrackedRoom {
+    let room = this.rooms.get(roomName);
+    if (!room) {
+      logger.warn("Room not found, auto-creating", { roomName });
+      room = {
+        roomName,
+        roomJid,
+        isBreakout,
+        createdAt: Date.now(),
+        participants: new Map(),
+      };
+      this.rooms.set(roomName, room);
+    }
+    return room;
   }
 
   /**
@@ -207,7 +217,7 @@ export class ConferenceTracker extends EventEmitter {
    * Serialize all rooms to a plain object for JSON responses.
    */
   toJSON(): Record<string, unknown>[] {
-    return this.getAllRooms().map(room => ({
+    return this.getAllRooms().map((room) => ({
       roomName: room.roomName,
       roomJid: room.roomJid,
       isBreakout: room.isBreakout,

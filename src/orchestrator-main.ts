@@ -8,11 +8,11 @@
  *   npm run start:orchestrator
  */
 
-import { loadOrchestratorConfig } from './orchestrator/OrchestratorConfig';
-import { OrchestratorService } from './orchestrator/OrchestratorService';
-import { createLogger } from './logger';
+import { loadOrchestratorConfig } from "./orchestrator/OrchestratorConfig";
+import { OrchestratorService } from "./orchestrator/OrchestratorService";
+import { createLogger } from "./logger";
 
-const logger = createLogger('OrchestratorMain');
+const logger = createLogger("OrchestratorMain");
 
 let service: OrchestratorService | null = null;
 let isShuttingDown = false;
@@ -30,35 +30,39 @@ async function shutdown(signal: string): Promise<void> {
     if (service) {
       await service.stop();
     }
-    logger.info('Orchestrator shutdown complete');
+    logger.info("Orchestrator shutdown complete");
     process.exit(0);
   } catch (error) {
-    logger.error('Error during orchestrator shutdown', { error: String(error) });
+    logger.error("Error during orchestrator shutdown", {
+      error: String(error),
+    });
     process.exit(1);
   }
 }
 
 // Register signal handlers
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 /**
  * Main entry point.
  */
 async function main(): Promise<void> {
-  logger.info('Starting Jitsi Translator Orchestrator');
+  logger.info("Starting Jitsi Translator Orchestrator");
 
   let config;
   try {
     config = loadOrchestratorConfig();
-    logger.info('Orchestrator configuration loaded', {
+    logger.info("Orchestrator configuration loaded", {
       webhookPort: config.webhookPort,
       jitsiDomain: config.jitsiDomain,
       maxAgentsPerRoom: config.maxAgentsPerRoom,
       maxTotalAgents: config.maxTotalAgents,
     });
   } catch (error) {
-    logger.error('Failed to load orchestrator configuration', { error: String(error) });
+    logger.error("Failed to load orchestrator configuration", {
+      error: String(error),
+    });
     process.exit(1);
   }
 
@@ -67,7 +71,7 @@ async function main(): Promise<void> {
   try {
     await service.start();
 
-    logger.info('Orchestrator is running', {
+    logger.info("Orchestrator is running", {
       webhookPort: config.webhookPort,
       healthCheckInterval: config.healthCheckIntervalMs,
     });
@@ -78,13 +82,13 @@ async function main(): Promise<void> {
       // Shutdown is handled by signal handlers
     });
   } catch (error) {
-    logger.error('Failed to start orchestrator', { error: String(error) });
-    await shutdown('ERROR');
+    logger.error("Failed to start orchestrator", { error: String(error) });
+    await shutdown("ERROR");
   }
 }
 
 // Run main
 main().catch((error) => {
-  console.error('Unhandled error:', error);
+  console.error("Unhandled error:", error);
   process.exit(1);
 });

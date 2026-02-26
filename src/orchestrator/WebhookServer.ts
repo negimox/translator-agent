@@ -6,21 +6,21 @@
  * 2. Provides REST API for manual control and monitoring
  */
 
-import express, { Express, Request, Response } from 'express';
-import { Server } from 'http';
-import { createLogger } from '../logger';
-import { OrchestratorConfig } from './OrchestratorConfig';
-import { ConferenceTracker } from './ConferenceTracker';
-import { AgentManager } from './AgentManager';
+import express, { Express, Request, Response } from "express";
+import { Server } from "http";
+import { createLogger } from "../logger";
+import { OrchestratorConfig } from "./OrchestratorConfig";
+import { ConferenceTracker } from "./ConferenceTracker";
+import { AgentManager } from "./AgentManager";
 import {
   RoomCreatedEvent,
   RoomDestroyedEvent,
   OccupantJoinedEvent,
   OccupantLeftEvent,
   OccupantLanguageChangedEvent,
-} from './types';
+} from "./types";
 
-const logger = createLogger('WebhookServer');
+const logger = createLogger("WebhookServer");
 
 export class WebhookServer {
   private config: OrchestratorConfig;
@@ -33,7 +33,7 @@ export class WebhookServer {
   constructor(
     config: OrchestratorConfig,
     tracker: ConferenceTracker,
-    agentManager: AgentManager
+    agentManager: AgentManager,
   ) {
     this.config = config;
     this.tracker = tracker;
@@ -48,70 +48,82 @@ export class WebhookServer {
    * Set up webhook routes for Prosody events.
    */
   private setupWebhookRoutes(): void {
-    this.app.post('/api/events/room/created', (req: Request, res: Response) => {
+    this.app.post("/api/events/room/created", (req: Request, res: Response) => {
       try {
         const event = req.body as RoomCreatedEvent;
-        logger.info('Webhook: room created', { roomName: event.room_name });
+        logger.info("Webhook: room created", { roomName: event.room_name });
         this.tracker.onRoomCreated(event);
         res.status(200).json({ ok: true });
       } catch (error) {
-        this.handleError(res, 'room/created', error);
+        this.handleError(res, "room/created", error);
       }
     });
 
-    this.app.post('/api/events/room/destroyed', (req: Request, res: Response) => {
-      try {
-        const event = req.body as RoomDestroyedEvent;
-        logger.info('Webhook: room destroyed', { roomName: event.room_name });
-        this.tracker.onRoomDestroyed(event);
-        res.status(200).json({ ok: true });
-      } catch (error) {
-        this.handleError(res, 'room/destroyed', error);
-      }
-    });
+    this.app.post(
+      "/api/events/room/destroyed",
+      (req: Request, res: Response) => {
+        try {
+          const event = req.body as RoomDestroyedEvent;
+          logger.info("Webhook: room destroyed", { roomName: event.room_name });
+          this.tracker.onRoomDestroyed(event);
+          res.status(200).json({ ok: true });
+        } catch (error) {
+          this.handleError(res, "room/destroyed", error);
+        }
+      },
+    );
 
-    this.app.post('/api/events/occupant/joined', (req: Request, res: Response) => {
-      try {
-        const event = req.body as OccupantJoinedEvent;
-        logger.info('Webhook: occupant joined', {
-          roomName: event.room_name,
-          occupantJid: event.occupant?.occupant_jid,
-        });
-        this.tracker.onOccupantJoined(event);
-        res.status(200).json({ ok: true });
-      } catch (error) {
-        this.handleError(res, 'occupant/joined', error);
-      }
-    });
+    this.app.post(
+      "/api/events/occupant/joined",
+      (req: Request, res: Response) => {
+        try {
+          const event = req.body as OccupantJoinedEvent;
+          logger.info("Webhook: occupant joined", {
+            roomName: event.room_name,
+            occupantJid: event.occupant?.occupant_jid,
+          });
+          this.tracker.onOccupantJoined(event);
+          res.status(200).json({ ok: true });
+        } catch (error) {
+          this.handleError(res, "occupant/joined", error);
+        }
+      },
+    );
 
-    this.app.post('/api/events/occupant/left', (req: Request, res: Response) => {
-      try {
-        const event = req.body as OccupantLeftEvent;
-        logger.info('Webhook: occupant left', {
-          roomName: event.room_name,
-          occupantJid: event.occupant?.occupant_jid,
-        });
-        this.tracker.onOccupantLeft(event);
-        res.status(200).json({ ok: true });
-      } catch (error) {
-        this.handleError(res, 'occupant/left', error);
-      }
-    });
+    this.app.post(
+      "/api/events/occupant/left",
+      (req: Request, res: Response) => {
+        try {
+          const event = req.body as OccupantLeftEvent;
+          logger.info("Webhook: occupant left", {
+            roomName: event.room_name,
+            occupantJid: event.occupant?.occupant_jid,
+          });
+          this.tracker.onOccupantLeft(event);
+          res.status(200).json({ ok: true });
+        } catch (error) {
+          this.handleError(res, "occupant/left", error);
+        }
+      },
+    );
 
-    this.app.post('/api/events/occupant/language-changed', (req: Request, res: Response) => {
-      try {
-        const event = req.body as OccupantLanguageChangedEvent;
-        logger.info('Webhook: language changed', {
-          roomName: event.room_name,
-          occupantJid: event.occupant?.occupant_jid,
-          language: event.occupant?.spoken_language,
-        });
-        this.tracker.onLanguageChanged(event);
-        res.status(200).json({ ok: true });
-      } catch (error) {
-        this.handleError(res, 'occupant/language-changed', error);
-      }
-    });
+    this.app.post(
+      "/api/events/occupant/language-changed",
+      (req: Request, res: Response) => {
+        try {
+          const event = req.body as OccupantLanguageChangedEvent;
+          logger.info("Webhook: language changed", {
+            roomName: event.room_name,
+            occupantJid: event.occupant?.occupant_jid,
+            language: event.occupant?.spoken_language,
+          });
+          this.tracker.onLanguageChanged(event);
+          res.status(200).json({ ok: true });
+        } catch (error) {
+          this.handleError(res, "occupant/language-changed", error);
+        }
+      },
+    );
   }
 
   /**
@@ -119,7 +131,7 @@ export class WebhookServer {
    */
   private setupRestApiRoutes(): void {
     // System health
-    this.app.get('/api/health', (_req: Request, res: Response) => {
+    this.app.get("/api/health", (_req: Request, res: Response) => {
       res.json({
         healthy: true,
         uptime: Date.now() - this.startedAt,
@@ -128,13 +140,13 @@ export class WebhookServer {
     });
 
     // Full system status
-    this.app.get('/api/status', (_req: Request, res: Response) => {
+    this.app.get("/api/status", (_req: Request, res: Response) => {
       const agents = this.agentManager.getAllAgents();
       const rooms = this.tracker.toJSON();
       res.json({
         uptime: Date.now() - this.startedAt,
         totalAgents: agents.length,
-        activeAgents: agents.filter(a => a.state === 'running').length,
+        activeAgents: agents.filter((a) => a.state === "running").length,
         totalRooms: rooms.length,
         rooms,
         agents,
@@ -143,21 +155,21 @@ export class WebhookServer {
     });
 
     // List agents
-    this.app.get('/api/agents', (_req: Request, res: Response) => {
+    this.app.get("/api/agents", (_req: Request, res: Response) => {
       res.json(this.agentManager.getAllAgents());
     });
 
     // List rooms
-    this.app.get('/api/rooms', (_req: Request, res: Response) => {
+    this.app.get("/api/rooms", (_req: Request, res: Response) => {
       res.json(this.tracker.toJSON());
     });
 
     // Manual spawn
-    this.app.post('/api/spawn', async (req: Request, res: Response) => {
+    this.app.post("/api/spawn", async (req: Request, res: Response) => {
       try {
         const { roomName, language } = req.body;
         if (!roomName || !language) {
-          res.status(400).json({ error: 'roomName and language required' });
+          res.status(400).json({ error: "roomName and language required" });
           return;
         }
         const agent = await this.agentManager.spawnAgent(roomName, language);
@@ -169,11 +181,11 @@ export class WebhookServer {
     });
 
     // Manual kill
-    this.app.post('/api/kill', async (req: Request, res: Response) => {
+    this.app.post("/api/kill", async (req: Request, res: Response) => {
       try {
         const { agentId } = req.body;
         if (!agentId) {
-          res.status(400).json({ error: 'agentId required' });
+          res.status(400).json({ error: "agentId required" });
           return;
         }
         await this.agentManager.killAgent(agentId);
@@ -191,13 +203,20 @@ export class WebhookServer {
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.server = this.app.listen(this.config.webhookPort, '0.0.0.0', () => {
-          this.startedAt = Date.now();
-          logger.info('WebhookServer started', { port: this.config.webhookPort, host: '0.0.0.0' });
-          resolve();
-        });
-        this.server.on('error', (error) => {
-          logger.error('WebhookServer error', { error: String(error) });
+        this.server = this.app.listen(
+          this.config.webhookPort,
+          "0.0.0.0",
+          () => {
+            this.startedAt = Date.now();
+            logger.info("WebhookServer started", {
+              port: this.config.webhookPort,
+              host: "0.0.0.0",
+            });
+            resolve();
+          },
+        );
+        this.server.on("error", (error) => {
+          logger.error("WebhookServer error", { error: String(error) });
           reject(error);
         });
       } catch (error) {
@@ -213,7 +232,7 @@ export class WebhookServer {
     if (this.server) {
       return new Promise((resolve) => {
         this.server!.close(() => {
-          logger.info('WebhookServer stopped');
+          logger.info("WebhookServer stopped");
           this.server = null;
           resolve();
         });

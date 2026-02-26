@@ -5,9 +5,9 @@
  * Each agent needs a unique botPagePort and healthPort.
  */
 
-import { createLogger } from '../logger';
+import { createLogger } from "../logger";
 
-const logger = createLogger('PortAllocator');
+const logger = createLogger("PortAllocator");
 
 export class PortAllocator {
   private botPagePortBase: number;
@@ -18,7 +18,10 @@ export class PortAllocator {
   constructor(botPagePortBase: number, healthPortBase: number) {
     this.botPagePortBase = botPagePortBase;
     this.healthPortBase = healthPortBase;
-    logger.info('PortAllocator initialized', { botPagePortBase, healthPortBase });
+    logger.info("PortAllocator initialized", {
+      botPagePortBase,
+      healthPortBase,
+    });
   }
 
   /**
@@ -33,7 +36,7 @@ export class PortAllocator {
     this.allocatedBotPorts.add(botPagePort);
     this.allocatedHealthPorts.add(healthPort);
 
-    logger.info('Ports allocated', { botPagePort, healthPort, offset });
+    logger.info("Ports allocated", { botPagePort, healthPort, offset });
     return { botPagePort, healthPort };
   }
 
@@ -43,7 +46,7 @@ export class PortAllocator {
   release(botPagePort: number, healthPort: number): void {
     this.allocatedBotPorts.delete(botPagePort);
     this.allocatedHealthPorts.delete(healthPort);
-    logger.info('Ports released', { botPagePort, healthPort });
+    logger.info("Ports released", { botPagePort, healthPort });
   }
 
   /**
@@ -53,11 +56,14 @@ export class PortAllocator {
     for (let offset = 0; offset < 100; offset++) {
       const botPort = this.botPagePortBase + offset;
       const healthPort = this.healthPortBase + offset;
-      if (!this.allocatedBotPorts.has(botPort) && !this.allocatedHealthPorts.has(healthPort)) {
+      if (
+        !this.allocatedBotPorts.has(botPort) &&
+        !this.allocatedHealthPorts.has(healthPort)
+      ) {
         return offset;
       }
     }
-    throw new Error('No available ports - all 100 offsets exhausted');
+    throw new Error("No available ports - all 100 offsets exhausted");
   }
 
   /**

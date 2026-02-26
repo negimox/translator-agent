@@ -6,19 +6,19 @@
  * events and delegates to AgentManager.
  */
 
-import { createLogger } from '../logger';
-import { OrchestratorConfig } from './OrchestratorConfig';
-import { ConferenceTracker } from './ConferenceTracker';
-import { AgentManager } from './AgentManager';
+import { createLogger } from "../logger";
+import { OrchestratorConfig } from "./OrchestratorConfig";
+import { ConferenceTracker } from "./ConferenceTracker";
+import { AgentManager } from "./AgentManager";
 
-const logger = createLogger('SpawnController');
+const logger = createLogger("SpawnController");
 
 export class SpawnController {
   private config: OrchestratorConfig;
   private tracker: ConferenceTracker;
   private agentManager: AgentManager;
 
-  private spawnCooldowns: Map<string, number> = new Map();       // roomName → last spawn timestamp
+  private spawnCooldowns: Map<string, number> = new Map(); // roomName → last spawn timestamp
   private terminationTimers: Map<string, NodeJS.Timeout> = new Map(); // agentId → grace period timer
 
   // Bound event handlers (for cleanup)
@@ -26,7 +26,11 @@ export class SpawnController {
   private boundOnTermEval: (data: { roomName: string }) => void;
   private boundOnRoomDestroyed: (data: { roomName: string }) => void;
 
-  constructor(config: OrchestratorConfig, tracker: ConferenceTracker, agentManager: AgentManager) {
+  constructor(
+    config: OrchestratorConfig,
+    tracker: ConferenceTracker,
+    agentManager: AgentManager,
+  ) {
     this.config = config;
     this.tracker = tracker;
     this.agentManager = agentManager;
@@ -35,33 +39,39 @@ export class SpawnController {
     this.boundOnTermEval = (data) => this.evaluateTermination(data.roomName);
     this.boundOnRoomDestroyed = (data) => this.onRoomDestroyed(data.roomName);
 
-    logger.info('SpawnController initialized');
+    logger.info("SpawnController initialized");
   }
 
   /**
    * Start listening to tracker events.
    */
   start(): void {
-    this.tracker.on('spawn-evaluation-needed', this.boundOnSpawnEval);
-    this.tracker.on('termination-evaluation-needed', this.boundOnTermEval);
-    this.tracker.on('room-destroyed', this.boundOnRoomDestroyed);
-    logger.info('SpawnController started');
+    this.tracker.on("spawn-evaluation-needed", this.boundOnSpawnEval);
+    this.tracker.on("termination-evaluation-needed", this.boundOnTermEval);
+    this.tracker.on("room-destroyed", this.boundOnRoomDestroyed);
+    logger.info("SpawnController started");
   }
 
   /**
    * Stop listening and clear all timers.
    */
   stop(): void {
-    this.tracker.removeListener('spawn-evaluation-needed', this.boundOnSpawnEval);
-    this.tracker.removeListener('termination-evaluation-needed', this.boundOnTermEval);
-    this.tracker.removeListener('room-destroyed', this.boundOnRoomDestroyed);
+    this.tracker.removeListener(
+      "spawn-evaluation-needed",
+      this.boundOnSpawnEval,
+    );
+    this.tracker.removeListener(
+      "termination-evaluation-needed",
+      this.boundOnTermEval,
+    );
+    this.tracker.removeListener("room-destroyed", this.boundOnRoomDestroyed);
 
     for (const timer of this.terminationTimers.values()) {
       clearTimeout(timer);
     }
     this.terminationTimers.clear();
     this.spawnCooldowns.clear();
-    logger.info('SpawnController stopped');
+    logger.info("SpawnController stopped");
   }
 
   /**
@@ -75,7 +85,7 @@ export class SpawnController {
       const existingAgents = this.agentManager.getAgentsForRoom(roomName);
       const realParticipants = totalParticipants - existingAgents.length;
 
-      logger.debug('Evaluating spawn', {
+      logger.debug("Evaluating spawn", {
         roomName,
         languages: Array.from(languages),
         totalParticipants,
@@ -84,7 +94,7 @@ export class SpawnController {
       });
 
       // Need at least 2 real participants and 2+ languages for translation to be useful
-      if (realParticipants < 2 || languages.size < 2) {
+      if (this.shouldHaveNoAgents(realParticipants, languages)) {
         // Conditions not met — evaluate if we should terminate existing agents
         if (existingAgents.length > 0) {
           this.evaluateTermination(roomName);
@@ -96,7 +106,10 @@ export class SpawnController {
       const lastSpawn = this.spawnCooldowns.get(roomName) || 0;
       const now = Date.now();
       if (now - lastSpawn < this.config.spawnCooldownMs) {
-        logger.debug('Spawn cooldown active', { roomName, remainingMs: this.config.spawnCooldownMs - (now - lastSpawn) });
+        logger.debug("Spawn cooldown active", {
+          roomName,
+          remainingMs: this.config.spawnCooldownMs - (now - lastSpawn),
+        });
         return;
       }
 
@@ -109,34 +122,39 @@ export class SpawnController {
 
         // Check if agent already exists
         const existing = this.agentManager.getAgent(agentId);
-        if (existing && (existing.state === 'spawning' || existing.state === 'running')) {
+        if (existing && this.agentManager.isActiveAgent(existing)) {
           continue;
         }
 
         // Check limits
-        if (this.agentManager.getTotalAgentCount() >= this.config.maxTotalAgents) {
-          logger.warn('Total agent limit reached, skipping spawn', { agentId });
+        if (
+          this.agentManager.getTotalAgentCount() >= this.config.maxTotalAgents
+        ) {
+          logger.warn("Total agent limit reached, skipping spawn", { agentId });
           break;
         }
 
         if (existingAgents.length >= this.config.maxAgentsPerRoom) {
-          logger.warn('Per-room agent limit reached, skipping spawn', { agentId, roomName });
+          logger.warn("Per-room agent limit reached, skipping spawn", {
+            agentId,
+            roomName,
+          });
           break;
         }
 
         // Spawn the agent
-        logger.info('Spawning agent for language', { roomName, language });
+        logger.info("Spawning agent for language", { roomName, language });
         try {
           await this.agentManager.spawnAgent(roomName, language);
           this.spawnCooldowns.set(roomName, Date.now());
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
-          logger.error('Failed to spawn agent', { agentId, error: errMsg });
+          logger.error("Failed to spawn agent", { agentId, error: errMsg });
         }
       }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      logger.error('Error in evaluateSpawn', { roomName, error: errMsg });
+      logger.error("Error in evaluateSpawn", { roomName, error: errMsg });
     }
   }
 
@@ -151,7 +169,7 @@ export class SpawnController {
       const existingAgents = this.agentManager.getAgentsForRoom(roomName);
       const realParticipants = totalParticipants - existingAgents.length;
 
-      logger.debug('Evaluating termination', {
+      logger.debug("Evaluating termination", {
         roomName,
         languages: Array.from(languages),
         realParticipants,
@@ -159,12 +177,11 @@ export class SpawnController {
       });
 
       for (const agent of existingAgents) {
-        // Terminate if: not enough participants, not enough languages,
-        // or this agent's language is no longer spoken by anyone
-        const shouldTerminate =
-          realParticipants < 2 ||
-          languages.size < 2 ||
-          !languages.has(agent.language);
+        const shouldTerminate = this.shouldHaveNoAgents(
+          realParticipants,
+          languages,
+          agent.language,
+        );
 
         if (shouldTerminate) {
           this.scheduleTermination(agent.id, roomName);
@@ -175,7 +192,7 @@ export class SpawnController {
       }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
-      logger.error('Error in evaluateTermination', { roomName, error: errMsg });
+      logger.error("Error in evaluateTermination", { roomName, error: errMsg });
     }
   }
 
@@ -183,7 +200,7 @@ export class SpawnController {
    * Handle room destruction — immediate kill all agents (no grace period).
    */
   private async onRoomDestroyed(roomName: string): Promise<void> {
-    logger.info('Room destroyed, killing all agents', { roomName });
+    logger.info("Room destroyed, killing all agents", { roomName });
 
     // Cancel any pending termination timers for this room
     for (const [agentId, timer] of this.terminationTimers.entries()) {
@@ -205,7 +222,7 @@ export class SpawnController {
       return;
     }
 
-    logger.info('Scheduling agent termination', {
+    logger.info("Scheduling agent termination", {
       agentId,
       graceMs: this.config.terminationGraceMs,
     });
@@ -220,22 +237,43 @@ export class SpawnController {
       const realParticipants = totalParticipants - existingAgents.length;
 
       const agent = this.agentManager.getAgent(agentId);
-      if (!agent || agent.state !== 'running') return;
+      if (!agent || agent.state !== "running") return;
 
-      const stillShouldTerminate =
-        realParticipants < 2 ||
-        languages.size < 2 ||
-        !languages.has(agent.language);
+      const stillShouldTerminate = this.shouldHaveNoAgents(
+        realParticipants,
+        languages,
+        agent.language,
+      );
 
       if (stillShouldTerminate) {
-        logger.info('Terminating agent after grace period', { agentId });
+        logger.info("Terminating agent after grace period", { agentId });
         await this.agentManager.killAgent(agentId);
       } else {
-        logger.info('Termination cancelled — conditions restored', { agentId });
+        logger.info("Termination cancelled — conditions restored", { agentId });
       }
     }, this.config.terminationGraceMs);
 
     this.terminationTimers.set(agentId, timer);
+  }
+
+  /**
+   * Returns true if conditions require no agents in the room
+   * (fewer than 2 real participants or fewer than 2 languages).
+   * If agentLanguage is provided, also checks whether that specific
+   * language is still spoken by any participant.
+   */
+  private shouldHaveNoAgents(
+    realParticipants: number,
+    languages: Set<string>,
+    agentLanguage?: string,
+  ): boolean {
+    if (realParticipants < 2 || languages.size < 2) {
+      return true;
+    }
+    if (agentLanguage && !languages.has(agentLanguage)) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -246,7 +284,7 @@ export class SpawnController {
     if (timer) {
       clearTimeout(timer);
       this.terminationTimers.delete(agentId);
-      logger.debug('Termination cancelled', { agentId });
+      logger.debug("Termination cancelled", { agentId });
     }
   }
 }

@@ -619,10 +619,12 @@ export class TranslatorAgent {
    */
   updateRateLimit(capacity: number, refillRate: number): void {
     if (this.translationPipeline) {
-      this.translationPipeline.getTokenBucket().updateConfig(capacity, refillRate);
-      logger.info('Rate limit updated', { capacity, refillRate });
+      this.translationPipeline
+        .getTokenBucket()
+        .updateConfig(capacity, refillRate);
+      logger.info("Rate limit updated", { capacity, refillRate });
     } else {
-      logger.warn('Cannot update rate limit - pipeline not initialized');
+      logger.warn("Cannot update rate limit - pipeline not initialized");
     }
   }
 

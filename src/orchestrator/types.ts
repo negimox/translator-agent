@@ -3,7 +3,12 @@
  */
 
 /** Agent lifecycle states */
-export type AgentState = 'spawning' | 'running' | 'stopping' | 'stopped' | 'failed';
+export type AgentState =
+  | "spawning"
+  | "running"
+  | "stopping"
+  | "stopped"
+  | "failed";
 
 /** Tracked participant in a conference room */
 export interface TrackedParticipant {
@@ -19,12 +24,12 @@ export interface TrackedRoom {
   roomJid: string;
   isBreakout: boolean;
   createdAt: number;
-  participants: Map<string, TrackedParticipant>;  // keyed by occupant_jid
+  participants: Map<string, TrackedParticipant>; // keyed by occupant_jid
 }
 
 /** Tracked translator agent */
 export interface TrackedAgent {
-  id: string;                    // `${roomName}:${language}`
+  id: string; // `${roomName}:${language}`
   roomName: string;
   language: string;
   state: AgentState;
@@ -39,7 +44,7 @@ export interface TrackedAgent {
 
 /** Webhook event payloads from Prosody event_sync */
 export interface RoomCreatedEvent {
-  event_name: 'muc-room-created';
+  event_name: "muc-room-created";
   room_name: string;
   room_jid: string;
   is_breakout: boolean;
@@ -47,7 +52,7 @@ export interface RoomCreatedEvent {
 }
 
 export interface RoomDestroyedEvent {
-  event_name: 'muc-room-destroyed';
+  event_name: "muc-room-destroyed";
   room_name: string;
   room_jid: string;
   is_breakout: boolean;
@@ -64,7 +69,7 @@ export interface RoomDestroyedEvent {
 }
 
 export interface OccupantJoinedEvent {
-  event_name: 'muc-occupant-joined';
+  event_name: "muc-occupant-joined";
   room_name: string;
   room_jid: string;
   is_breakout: boolean;
@@ -79,7 +84,7 @@ export interface OccupantJoinedEvent {
 }
 
 export interface OccupantLeftEvent {
-  event_name: 'muc-occupant-left';
+  event_name: "muc-occupant-left";
   room_name: string;
   room_jid: string;
   is_breakout: boolean;
@@ -95,7 +100,7 @@ export interface OccupantLeftEvent {
 }
 
 export interface OccupantLanguageChangedEvent {
-  event_name: 'muc-occupant-language-changed';
+  event_name: "muc-occupant-language-changed";
   room_name: string;
   room_jid: string;
   is_breakout: boolean;
@@ -115,13 +120,13 @@ export type WebhookEvent =
 
 /** IPC messages between orchestrator and child agents */
 export interface RateLimitUpdateMessage {
-  type: 'rate-limit-update';
+  type: "rate-limit-update";
   capacity: number;
   refillRate: number;
 }
 
 export interface MetricsMessage {
-  type: 'metrics';
+  type: "metrics";
   pipelineMetrics: Record<string, unknown>;
 }
 

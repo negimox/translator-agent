@@ -614,6 +614,19 @@ export class TranslatorAgent {
   }
 
   /**
+   * Phase 7: Updates the rate limit for the translation pipeline's token bucket.
+   * Called when the orchestrator adjusts fractional rate limits via IPC.
+   */
+  updateRateLimit(capacity: number, refillRate: number): void {
+    if (this.translationPipeline) {
+      this.translationPipeline.getTokenBucket().updateConfig(capacity, refillRate);
+      logger.info('Rate limit updated', { capacity, refillRate });
+    } else {
+      logger.warn('Cannot update rate limit - pipeline not initialized');
+    }
+  }
+
+  /**
    * Phase 3: Gets the chunk aggregator for direct access.
    */
   getAggregator() {

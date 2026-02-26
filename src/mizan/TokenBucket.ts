@@ -288,6 +288,23 @@ export class TokenBucket extends EventEmitter {
   }
 
   /**
+   * Dynamically updates the bucket capacity and refill rate.
+   * Used by the orchestrator to implement fractional rate limiting
+   * when multiple agents share a global quota.
+   */
+  updateConfig(capacity: number, refillRate: number): void {
+    this.config.capacity = capacity;
+    this.config.refillRate = refillRate;
+    // Cap current tokens to new capacity
+    this.tokens = Math.min(this.tokens, capacity);
+    logger.info("TokenBucket config updated", {
+      capacity,
+      refillRate,
+      currentTokens: this.tokens,
+    });
+  }
+
+  /**
    * Gets the configuration.
    */
   getConfig(): TokenBucketConfig {

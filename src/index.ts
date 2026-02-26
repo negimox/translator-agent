@@ -73,6 +73,23 @@ async function main(): Promise<void> {
     // Create and start the agent
     agent = new TranslatorAgent(config);
 
+    // Phase 7: If running as child process (spawned by orchestrator), listen for IPC messages
+    if (process.send) {
+        logger.info('Running as child process - IPC enabled');
+        process.on('message', (msg: unknown) => {
+            if (msg && typeof msg === 'object' && (msg as Record<string, unknown>).type === 'rate-limit-update') {
+                const update = msg as { type: string; capacity: number; refillRate: number };
+                logger.info('Rate limit update from orchestrator', {
+                    capacity: update.capacity,
+                    refillRate: update.refillRate,
+                });
+                if (agent) {
+                    agent.updateRateLimit(update.capacity, update.refillRate);
+                }
+            }
+        });
+    }
+
     // Create and start health server
     healthServer = new HealthServer(config, agent);
 

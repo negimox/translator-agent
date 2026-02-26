@@ -191,9 +191,9 @@ export class WebhookServer {
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.server = this.app.listen(this.config.webhookPort, () => {
+        this.server = this.app.listen(this.config.webhookPort, '0.0.0.0', () => {
           this.startedAt = Date.now();
-          logger.info('WebhookServer started', { port: this.config.webhookPort });
+          logger.info('WebhookServer started', { port: this.config.webhookPort, host: '0.0.0.0' });
           resolve();
         });
         this.server.on('error', (error) => {

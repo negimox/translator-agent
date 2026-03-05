@@ -20,6 +20,7 @@ export class SpawnController {
 
   private spawnCooldowns: Map<string, number> = new Map(); // roomName → last spawn timestamp
   private terminationTimers: Map<string, NodeJS.Timeout> = new Map(); // agentId → grace period timer
+  private roomLocks: Map<string, Promise<void>> = new Map(); // roomName → serialization chain
 
   // Bound event handlers (for cleanup)
   private boundOnSpawnEval: (data: { roomName: string }) => void;
@@ -35,9 +36,34 @@ export class SpawnController {
     this.tracker = tracker;
     this.agentManager = agentManager;
 
-    this.boundOnSpawnEval = (data) => this.evaluateSpawn(data.roomName);
-    this.boundOnTermEval = (data) => this.evaluateTermination(data.roomName);
-    this.boundOnRoomDestroyed = (data) => this.onRoomDestroyed(data.roomName);
+    this.boundOnSpawnEval = (data) => {
+      this.withRoomLock(data.roomName, () =>
+        this.evaluateSpawn(data.roomName),
+      ).catch((err) =>
+        logger.error("Unhandled error in spawn evaluation", {
+          roomName: data.roomName,
+          error: String(err),
+        }),
+      );
+    };
+    this.boundOnTermEval = (data) => {
+      this.withRoomLock(data.roomName, () =>
+        this.evaluateTermination(data.roomName),
+      ).catch((err) =>
+        logger.error("Unhandled error in termination evaluation", {
+          roomName: data.roomName,
+          error: String(err),
+        }),
+      );
+    };
+    this.boundOnRoomDestroyed = (data) => {
+      this.onRoomDestroyed(data.roomName).catch((err) =>
+        logger.error("Unhandled error in room destroyed handler", {
+          roomName: data.roomName,
+          error: String(err),
+        }),
+      );
+    };
 
     logger.info("SpawnController initialized");
   }
@@ -71,7 +97,26 @@ export class SpawnController {
     }
     this.terminationTimers.clear();
     this.spawnCooldowns.clear();
+    this.roomLocks.clear();
     logger.info("SpawnController stopped");
+  }
+
+  /**
+   * Serializes async operations per room to prevent race conditions.
+   */
+  private async withRoomLock(
+    roomName: string,
+    fn: () => Promise<void>,
+  ): Promise<void> {
+    const prev = this.roomLocks.get(roomName) || Promise.resolve();
+    const next = prev.then(fn, fn);
+    this.roomLocks.set(roomName, next);
+    next.finally(() => {
+      if (this.roomLocks.get(roomName) === next) {
+        this.roomLocks.delete(roomName);
+      }
+    });
+    return next;
   }
 
   /**

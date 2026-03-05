@@ -130,4 +130,11 @@ export interface MetricsMessage {
   pipelineMetrics: Record<string, unknown>;
 }
 
-export type IPCMessage = RateLimitUpdateMessage | MetricsMessage;
+export interface AgentReadyMessage {
+  type: "agent-ready";
+}
+
+export type IPCMessage =
+  | RateLimitUpdateMessage
+  | MetricsMessage
+  | AgentReadyMessage;

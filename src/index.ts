@@ -49,6 +49,7 @@ async function shutdown(signal: string): Promise<void> {
 // Register signal handlers
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGHUP", () => shutdown("SIGHUP"));
 
 /**
  * Main entry point.
@@ -96,6 +97,17 @@ async function main(): Promise<void> {
         }
       }
     });
+
+    // Detect orchestrator crash: IPC disconnect means parent is gone
+    process.on("disconnect", () => {
+      logger.warn("IPC channel disconnected - orchestrator may have crashed");
+      logger.info("Will shut down in 30s if not terminated sooner");
+      setTimeout(() => {
+        if (!isShuttingDown) {
+          shutdown("ORCHESTRATOR_DISCONNECT");
+        }
+      }, 30_000);
+    });
   }
 
   // Create and start health server
@@ -107,6 +119,11 @@ async function main(): Promise<void> {
 
     // Start the translator agent
     await agent.start();
+
+    // Notify orchestrator that agent is ready (if running as child process)
+    if (process.send) {
+      process.send({ type: "agent-ready" });
+    }
 
     logger.info("Translator agent is running", {
       displayName: getDisplayName(config),

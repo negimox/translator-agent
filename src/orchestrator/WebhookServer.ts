@@ -6,7 +6,7 @@
  * 2. Provides REST API for manual control and monitoring
  */
 
-import express, { Express, Request, Response } from "express";
+import express, { Express, Request, Response, NextFunction } from "express";
 import { Server } from "http";
 import { createLogger } from "../logger";
 import { OrchestratorConfig } from "./OrchestratorConfig";
@@ -21,6 +21,38 @@ import {
 } from "./types";
 
 const logger = createLogger("WebhookServer");
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function validateRoomEvent(body: unknown): body is { room_name: string } {
+  return (
+    !!body &&
+    typeof body === "object" &&
+    typeof (body as any).room_name === "string"
+  );
+}
+
+function validateOccupantEvent(
+  body: unknown,
+): body is { room_name: string; occupant: { occupant_jid: string } } {
+  return (
+    validateRoomEvent(body) &&
+    !!(body as any).occupant &&
+    typeof (body as any).occupant.occupant_jid === "string"
+  );
+}
+
+function validateLanguageEvent(
+  body: unknown,
+): body is {
+  room_name: string;
+  occupant: { occupant_jid: string; spoken_language: string };
+} {
+  return (
+    validateOccupantEvent(body) &&
+    typeof (body as any).occupant.spoken_language === "string"
+  );
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export class WebhookServer {
   private config: OrchestratorConfig;
@@ -40,8 +72,46 @@ export class WebhookServer {
     this.agentManager = agentManager;
     this.app = express();
     this.app.use(express.json());
+    this.setupAuthMiddleware();
     this.setupWebhookRoutes();
     this.setupRestApiRoutes();
+  }
+
+  /**
+   * Set up authentication middleware for webhook and API mutation routes.
+   * Read-only routes (/api/health, /api/status, /api/agents, /api/rooms) skip auth.
+   * If a token is not configured (empty string), auth is skipped for backward compatibility.
+   */
+  private setupAuthMiddleware(): void {
+    const makeTokenAuth = (token: string) => {
+      return (req: Request, res: Response, next: NextFunction): void => {
+        if (!token) {
+          next();
+          return;
+        }
+        const authHeader = req.headers.authorization;
+        if (!authHeader || authHeader !== `Bearer ${token}`) {
+          res.status(401).json({ error: "Unauthorized" });
+          return;
+        }
+        next();
+      };
+    };
+
+    // Webhook routes require webhookAuthToken
+    if (this.config.webhookAuthToken) {
+      this.app.use(
+        "/api/events",
+        makeTokenAuth(this.config.webhookAuthToken),
+      );
+    }
+
+    // Mutation routes require apiAuthToken
+    if (this.config.apiAuthToken) {
+      const apiAuth = makeTokenAuth(this.config.apiAuthToken);
+      this.app.use("/api/spawn", apiAuth);
+      this.app.use("/api/kill", apiAuth);
+    }
   }
 
   /**
@@ -50,6 +120,10 @@ export class WebhookServer {
   private setupWebhookRoutes(): void {
     this.app.post("/api/events/room/created", (req: Request, res: Response) => {
       try {
+        if (!validateRoomEvent(req.body)) {
+          res.status(400).json({ error: "Invalid payload" });
+          return;
+        }
         const event = req.body as RoomCreatedEvent;
         logger.info("Webhook: room created", { roomName: event.room_name });
         this.tracker.onRoomCreated(event);
@@ -63,6 +137,10 @@ export class WebhookServer {
       "/api/events/room/destroyed",
       (req: Request, res: Response) => {
         try {
+          if (!validateRoomEvent(req.body)) {
+            res.status(400).json({ error: "Invalid payload" });
+            return;
+          }
           const event = req.body as RoomDestroyedEvent;
           logger.info("Webhook: room destroyed", { roomName: event.room_name });
           this.tracker.onRoomDestroyed(event);
@@ -77,6 +155,10 @@ export class WebhookServer {
       "/api/events/occupant/joined",
       (req: Request, res: Response) => {
         try {
+          if (!validateOccupantEvent(req.body)) {
+            res.status(400).json({ error: "Invalid payload" });
+            return;
+          }
           const event = req.body as OccupantJoinedEvent;
           logger.info("Webhook: occupant joined", {
             roomName: event.room_name,
@@ -94,6 +176,10 @@ export class WebhookServer {
       "/api/events/occupant/left",
       (req: Request, res: Response) => {
         try {
+          if (!validateOccupantEvent(req.body)) {
+            res.status(400).json({ error: "Invalid payload" });
+            return;
+          }
           const event = req.body as OccupantLeftEvent;
           logger.info("Webhook: occupant left", {
             roomName: event.room_name,
@@ -111,6 +197,10 @@ export class WebhookServer {
       "/api/events/occupant/language-changed",
       (req: Request, res: Response) => {
         try {
+          if (!validateLanguageEvent(req.body)) {
+            res.status(400).json({ error: "Invalid payload" });
+            return;
+          }
           const event = req.body as OccupantLanguageChangedEvent;
           logger.info("Webhook: language changed", {
             roomName: event.room_name,
@@ -231,7 +321,13 @@ export class WebhookServer {
   async stop(): Promise<void> {
     if (this.server) {
       return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          logger.warn("WebhookServer close timed out, forcing");
+          this.server = null;
+          resolve();
+        }, 5000);
         this.server!.close(() => {
+          clearTimeout(timeout);
           logger.info("WebhookServer stopped");
           this.server = null;
           resolve();

@@ -39,6 +39,12 @@ export interface OrchestratorConfig {
   ttsSpeed: number;
   translationTemplatePattern: string;
 
+  shutdownTimeoutMs: number;
+  agentStartupTimeoutMs: number;
+
+  webhookAuthToken: string;
+  apiAuthToken: string;
+
   logLevel: "debug" | "info" | "warn" | "error";
 }
 
@@ -87,6 +93,15 @@ export function loadOrchestratorConfig(): OrchestratorConfig {
     ttsSpeed: parseFloatEnv(process.env.TTS_SPEED, 1.0),
     translationTemplatePattern:
       process.env.TRANSLATION_TEMPLATE_PATTERN || "translator_{target}",
+
+    shutdownTimeoutMs: parseIntEnv(process.env.SHUTDOWN_TIMEOUT_MS, 30000),
+    agentStartupTimeoutMs: parseIntEnv(
+      process.env.AGENT_STARTUP_TIMEOUT_MS,
+      120000,
+    ),
+
+    webhookAuthToken: process.env.WEBHOOK_AUTH_TOKEN || "",
+    apiAuthToken: process.env.API_AUTH_TOKEN || "",
 
     logLevel:
       (process.env.LOG_LEVEL as OrchestratorConfig["logLevel"]) || "info",

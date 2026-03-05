@@ -26,10 +26,16 @@ async function shutdown(signal: string): Promise<void> {
 
   logger.info(`Received ${signal}, shutting down orchestrator`);
 
+  const shutdownTimer = setTimeout(() => {
+    logger.error("Shutdown timed out, forcing exit");
+    process.exit(1);
+  }, 30_000);
+
   try {
     if (service) {
       await service.stop();
     }
+    clearTimeout(shutdownTimer);
     logger.info("Orchestrator shutdown complete");
     process.exit(0);
   } catch (error) {
@@ -40,9 +46,24 @@ async function shutdown(signal: string): Promise<void> {
   }
 }
 
+// Register global error handlers
+process.on("unhandledRejection", (reason) => {
+  logger.error("Unhandled rejection", { reason: String(reason) });
+  shutdown("UNHANDLED_REJECTION");
+});
+
+process.on("uncaughtException", (error: Error) => {
+  logger.error("Uncaught exception", {
+    error: error.message,
+    stack: error.stack,
+  });
+  shutdown("UNCAUGHT_EXCEPTION");
+});
+
 // Register signal handlers
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGHUP", () => shutdown("SIGHUP"));
 
 /**
  * Main entry point.

@@ -34,7 +34,11 @@ export class ConferenceTracker extends EventEmitter {
     const { room_name, room_jid, is_breakout, created_at } = event;
 
     if (this.rooms.has(room_name)) {
-      logger.warn("Room already tracked, updating", { roomName: room_name });
+      logger.warn(
+        "Room already tracked, ignoring duplicate room-created event",
+        { roomName: room_name },
+      );
+      return; // preserve existing participant state
     }
 
     const room: TrackedRoom = {

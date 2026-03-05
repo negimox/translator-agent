@@ -20,6 +20,7 @@ export class AgentManager extends EventEmitter {
   private portAllocator: PortAllocator;
   private agents: Map<string, TrackedAgent> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
+  private startupTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(config: OrchestratorConfig, portAllocator: PortAllocator) {
     super();
@@ -100,7 +101,6 @@ export class AgentManager extends EventEmitter {
       });
 
       agent.pid = child.pid || null;
-      agent.state = "running";
       this.processes.set(agentId, child);
 
       // Pipe child stdout/stderr with agent prefix
@@ -136,6 +136,22 @@ export class AgentManager extends EventEmitter {
       child.on("message", (msg: unknown) => {
         this.handleChildMessage(agentId, msg);
       });
+
+      // Set startup timeout — agent must send "agent-ready" within this period
+      const startupTimer = setTimeout(() => {
+        this.startupTimers.delete(agentId);
+        const currentAgent = this.agents.get(agentId);
+        if (currentAgent && currentAgent.state === "spawning") {
+          logger.error("Agent startup timeout", { agentId });
+          this.killAgent(agentId).catch((err) =>
+            logger.error("Failed to kill timed-out agent", {
+              agentId,
+              error: String(err),
+            }),
+          );
+        }
+      }, this.config.agentStartupTimeoutMs);
+      this.startupTimers.set(agentId, startupTimer);
 
       // Broadcast updated rate limits to all agents
       this.broadcastRateLimitUpdate();
@@ -303,14 +319,17 @@ export class AgentManager extends EventEmitter {
     const agent = this.agents.get(agentId);
     if (!agent) return;
 
+    const { roomName, language, restartCount } = agent;
     logger.info("Restarting agent", {
       agentId,
-      restartCount: agent.restartCount,
+      restartCount,
     });
-    agent.restartCount++;
 
     await this.killAgent(agentId);
-    await this.spawnAgent(agent.roomName, agent.language);
+    // spawnAgent picks up restartCount from existing entry, but killAgent
+    // now deletes the entry. Pass the incremented count via a temporary entry.
+    const newAgent = await this.spawnAgent(roomName, language);
+    newAgent.restartCount = restartCount + 1;
   }
 
   /**
@@ -368,10 +387,15 @@ export class AgentManager extends EventEmitter {
   private cleanupAgent(agentId: string): void {
     const agent = this.agents.get(agentId);
     if (agent) {
-      agent.state = "stopped";
       this.portAllocator.release(agent.botPagePort, agent.healthPort);
     }
+    const startupTimer = this.startupTimers.get(agentId);
+    if (startupTimer) {
+      clearTimeout(startupTimer);
+      this.startupTimers.delete(agentId);
+    }
     this.processes.delete(agentId);
+    this.agents.delete(agentId);
   }
 
   /**
@@ -381,7 +405,24 @@ export class AgentManager extends EventEmitter {
     if (!msg || typeof msg !== "object") return;
 
     const message = msg as Record<string, unknown>;
-    if (message.type === "metrics") {
+
+    if (message.type === "agent-ready") {
+      const agent = this.agents.get(agentId);
+      if (agent && agent.state === "spawning") {
+        agent.state = "running";
+        logger.info("Agent ready", { agentId });
+
+        // Clear startup timeout
+        const timer = this.startupTimers.get(agentId);
+        if (timer) {
+          clearTimeout(timer);
+          this.startupTimers.delete(agentId);
+        }
+
+        // Now safe to include in rate distribution
+        this.broadcastRateLimitUpdate();
+      }
+    } else if (message.type === "metrics") {
       this.emit("agent-metrics", { agentId, metrics: message.pipelineMetrics });
     }
   }

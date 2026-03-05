@@ -545,8 +545,14 @@ function updateBotAudioSubscription() {
       if (lang === botTargetLanguage) {
         excludeIds.add(participantId);
         exclusionReasons[participantId] =
-          (exclusionReasons[participantId] ? exclusionReasons[participantId] + " + " : "") +
-          "same-language (" + lang + "=" + botTargetLanguage + ")";
+          (exclusionReasons[participantId]
+            ? exclusionReasons[participantId] + " + "
+            : "") +
+          "same-language (" +
+          lang +
+          "=" +
+          botTargetLanguage +
+          ")";
       }
     });
   }
@@ -1037,7 +1043,6 @@ function handleAudioTrackAdded(track, participantId) {
         // Try connecting anyway
         connectToWorklet();
       });
-
   } catch (error) {
     console.error("[Bot] Error connecting audio track:", error);
     console.error("[Bot] Error stack:", error.stack);

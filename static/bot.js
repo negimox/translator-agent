@@ -68,6 +68,7 @@ function initConnection() {
   console.log("[Bot] Creating JitsiConnection with options:", options);
 
   connection = new JitsiMeetJS.JitsiConnection(null, null, options);
+  window.connection = connection;
 
   connection.addEventListener(
     JitsiMeetJS.events.connection.CONNECTION_ESTABLISHED,
@@ -128,6 +129,7 @@ function initRoom() {
 
   console.log("[Bot] Initializing conference:", botConfig.roomName);
   room = connection.initJitsiConference(botConfig.roomName, options);
+  window.room = room;
 
   // Initialize audio capture maps BEFORE registering event handlers.
   // PARTICIPANT_PROPERTY_CHANGED and USER_JOINED fire during the join

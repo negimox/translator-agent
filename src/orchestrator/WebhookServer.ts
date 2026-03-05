@@ -41,9 +41,7 @@ function validateOccupantEvent(
   );
 }
 
-function validateLanguageEvent(
-  body: unknown,
-): body is {
+function validateLanguageEvent(body: unknown): body is {
   room_name: string;
   occupant: { occupant_jid: string; spoken_language: string };
 } {
@@ -100,10 +98,7 @@ export class WebhookServer {
 
     // Webhook routes require webhookAuthToken
     if (this.config.webhookAuthToken) {
-      this.app.use(
-        "/api/events",
-        makeTokenAuth(this.config.webhookAuthToken),
-      );
+      this.app.use("/api/events", makeTokenAuth(this.config.webhookAuthToken));
     }
 
     // Mutation routes require apiAuthToken

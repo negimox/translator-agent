@@ -689,7 +689,7 @@ export class TranslationPipeline extends EventEmitter {
       "en-gb": "b",
       hi: "h", // Hindi
       ur: "h", // Urdu (uses Hindi TTS — mutually intelligible spoken form)
-      ar: "a", // Arabic (no native TTS; romanized text read by English voice)
+      ar: "h", // Arabic (uses Hindi TTS — romanized/transliterated text via Hindi voice)
       es: "e", // Spanish
       fr: "f", // French
       ja: "j", // Japanese
@@ -711,7 +711,7 @@ export class TranslationPipeline extends EventEmitter {
       en: "af_heart", // American English female
       hi: "hm_psi", // Hindi male — best quality for Hindi
       ur: "hm_psi", // Urdu — uses Hindi voice (mutually intelligible)
-      ar: "hm_psi", // Arabic — romanized text read by English male voice
+      ar: "hm_psi", // Arabic — romanized/transliterated text read by Hindi voice
       es: "ef_dora", // Spanish female
       fr: "ff_siwis", // French female
       ja: "jf_alpha", // Japanese female

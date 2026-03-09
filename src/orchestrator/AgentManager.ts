@@ -12,6 +12,7 @@ import { createLogger } from "../logger";
 import { TrackedAgent, AgentState, RateLimitUpdateMessage } from "./types";
 import { OrchestratorConfig } from "./OrchestratorConfig";
 import { PortAllocator } from "./PortAllocator";
+import { TranslationPipeline } from "../mizan/TranslationPipeline";
 
 const logger = createLogger("AgentManager");
 
@@ -357,7 +358,7 @@ export class AgentManager extends EventEmitter {
       MIZAN_USERNAME: this.config.mizanUsername,
       MIZAN_PASSWORD: this.config.mizanPassword,
       AGENT_DISPLAY_NAME_PREFIX: this.config.agentDisplayNamePrefix,
-      TTS_VOICE: this.config.ttsVoice,
+      TTS_VOICE: TranslationPipeline.getVoiceForLanguage(language),
       TTS_SPEED: String(this.config.ttsSpeed),
       TRANSLATION_TEMPLATE_PATTERN: this.config.translationTemplatePattern,
       LOG_LEVEL: this.config.logLevel,

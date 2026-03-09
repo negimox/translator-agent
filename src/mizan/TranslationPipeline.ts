@@ -94,7 +94,7 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   sourceLanguage: "en",
   targetLanguage: "hi",
   translationTemplatePattern: "translator_{target}",
-  ttsVoice: "af_heart",
+  ttsVoice: "hm_psi",
   ttsSpeed: 1,
   retryInitialDelayMs: 500,
   retryMaxDelayMs: 8000,
@@ -688,6 +688,8 @@ export class TranslationPipeline extends EventEmitter {
       "en-us": "a",
       "en-gb": "b",
       hi: "h", // Hindi
+      ur: "h", // Urdu (uses Hindi TTS — mutually intelligible spoken form)
+      ar: "a", // Arabic (no native TTS; romanized text read by English voice)
       es: "e", // Spanish
       fr: "f", // French
       ja: "j", // Japanese
@@ -697,6 +699,28 @@ export class TranslationPipeline extends EventEmitter {
     };
 
     return languageMap[this.config.targetLanguage.toLowerCase()] || "a";
+  }
+
+  /**
+   * Returns the optimal TTS voice for a given target language.
+   * This is a static utility so the orchestrator can also use it
+   * to pass the correct TTS_VOICE env var to child agents.
+   */
+  static getVoiceForLanguage(language: string): string {
+    const voiceMap: Record<string, string> = {
+      en: "af_heart", // American English female
+      hi: "hm_psi", // Hindi male — best quality for Hindi
+      ur: "hm_psi", // Urdu — uses Hindi voice (mutually intelligible)
+      ar: "hm_psi", // Arabic — romanized text read by English male voice
+      es: "ef_dora", // Spanish female
+      fr: "ff_siwis", // French female
+      ja: "jf_alpha", // Japanese female
+      zh: "zf_xiaoxiao", // Mandarin female
+      it: "if_sara", // Italian female
+      pt: "pf_dora", // Brazilian Portuguese female
+    };
+
+    return voiceMap[language.toLowerCase()] || "af_heart";
   }
 
   /**

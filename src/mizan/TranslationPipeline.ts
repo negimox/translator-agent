@@ -1,8 +1,13 @@
 /**
- * Translation Pipeline Orchestrator (Phase 4)
+ * Translation Pipeline Orchestrator (Phase 4 / Updated Phase 7.1)
  *
  * Coordinates the full translation pipeline:
  * Audio Chunk → STT → Translation → TTS → Audio Output
+ *
+ * Provider Support (Phase 7.1):
+ * - STT: ElevenLabs (Scribe v2) or Mizan
+ * - Translation: Mizan (template-based)
+ * - TTS: ElevenLabs (streaming) or Mizan
  *
  * Features:
  * - Rate limiting via TokenBucket
@@ -35,6 +40,14 @@ import {
   CircuitOpenError,
 } from "./CircuitBreaker";
 import { ChunkQueue, QueuedChunk } from "./ChunkQueue";
+import {
+  ISTTProvider,
+  ITranslationProvider,
+  ITTSProvider,
+  ProviderError,
+  ProviderFactory,
+  getVoiceConfig,
+} from "../providers";
 
 const logger = createLogger("TranslationPipeline");
 
@@ -42,7 +55,7 @@ const logger = createLogger("TranslationPipeline");
  * Translation pipeline configuration.
  */
 export interface TranslationPipelineConfig {
-  // Mizan API configuration
+  // Mizan API configuration (for legacy mode or translation-only)
   mizan: Partial<MizanConfig>;
 
   // Source language (what is being spoken)
@@ -54,7 +67,7 @@ export interface TranslationPipelineConfig {
   // Translation template name pattern
   translationTemplatePattern: string;
 
-  // TTS voice to use
+  // TTS voice to use (legacy Mizan mode)
   ttsVoice: string;
 
   // TTS speed (0.25-4)
@@ -84,6 +97,12 @@ export interface TranslationPipelineConfig {
   // Debug configuration
   debugMode: boolean;
   debugOutputDir: string;
+
+  // Provider configuration (Phase 7.1)
+  /** Provider factory for ElevenLabs+Mizan mode */
+  providerFactory?: ProviderFactory;
+  /** Use ElevenLabs for STT/TTS (true) or Mizan for all (false) */
+  useElevenLabs?: boolean;
 }
 
 /**
@@ -109,6 +128,9 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   maxInFlight: 2,
   debugMode: false,
   debugOutputDir: "./debug_chunks",
+  // Provider configuration (Phase 7.1)
+  providerFactory: undefined,
+  useElevenLabs: false, // Default to legacy Mizan mode for backward compatibility
 };
 
 /**
@@ -156,10 +178,15 @@ export interface PipelineMetrics {
  */
 export class TranslationPipeline extends EventEmitter {
   private config: TranslationPipelineConfig;
-  private mizanClient: MizanClient;
+  private mizanClient: MizanClient | null = null;
   private tokenBucket: TokenBucket;
   private circuitBreaker: CircuitBreaker;
   private queue: ChunkQueue;
+
+  // Provider instances (Phase 7.1)
+  private sttProvider: ISTTProvider | null = null;
+  private translationProvider: ITranslationProvider | null = null;
+  private ttsProvider: ITTSProvider | null = null;
 
   private isRunning: boolean = false;
   private processInterval: NodeJS.Timeout | null = null;
@@ -184,8 +211,18 @@ export class TranslationPipeline extends EventEmitter {
     super();
     this.config = { ...DEFAULT_PIPELINE_CONFIG, ...config };
 
-    // Initialize Mizan client
-    this.mizanClient = new MizanClient(this.config.mizan);
+    // Initialize providers based on configuration
+    if (this.config.useElevenLabs && this.config.providerFactory) {
+      // Phase 7.1: Use ElevenLabs for STT/TTS, Mizan for Translation
+      this.sttProvider = this.config.providerFactory.getSTTProvider('elevenlabs');
+      this.translationProvider = this.config.providerFactory.getTranslationProvider('mizan');
+      this.ttsProvider = this.config.providerFactory.getTTSProvider('elevenlabs');
+      logger.info("Using ElevenLabs STT/TTS + Mizan Translation");
+    } else {
+      // Legacy mode: Mizan for all
+      this.mizanClient = new MizanClient(this.config.mizan);
+      logger.info("Using Mizan for all (legacy mode)");
+    }
 
     // Initialize token bucket
     this.tokenBucket = new TokenBucket({
@@ -465,12 +502,121 @@ export class TranslationPipeline extends EventEmitter {
 
   /**
    * Runs the full translation pipeline for a chunk.
+   * Uses ElevenLabs providers when configured, otherwise falls back to Mizan.
    */
   private async runPipeline(chunk: AudioChunk): Promise<{
     transcription: string;
     translation: string;
     audioBuffer: ArrayBuffer;
   }> {
+    // Use providers if available (Phase 7.1), otherwise use legacy Mizan client
+    if (this.sttProvider && this.translationProvider && this.ttsProvider) {
+      return this.runPipelineWithProviders(chunk);
+    } else {
+      return this.runPipelineWithMizan(chunk);
+    }
+  }
+
+  /**
+   * Runs pipeline with ElevenLabs STT/TTS + Mizan Translation (Phase 7.1).
+   */
+  private async runPipelineWithProviders(chunk: AudioChunk): Promise<{
+    transcription: string;
+    translation: string;
+    audioBuffer: ArrayBuffer;
+  }> {
+    // Step 1: Speech-to-Text (ElevenLabs)
+    const sttStart = Date.now();
+    const sttResult = await this.sttProvider!.transcribe({
+      audioBuffer: chunk.wavBuffer,
+      language: this.config.sourceLanguage,
+      vadFilter: true,
+    });
+    this.totalSttLatencyMs += Date.now() - sttStart;
+
+    const transcription = sttResult.text || "";
+
+    if (transcription.trim() === "") {
+      logger.debug("Empty transcription result, skipping chunk", {
+        chunkId: chunk.chunkId,
+        provider: this.sttProvider!.name,
+      });
+      throw new Error("Empty transcription result");
+    }
+
+    logger.debug("STT completed (ElevenLabs)", {
+      chunkId: chunk.chunkId,
+      transcription: transcription.substring(0, 50),
+      detectedLanguage: sttResult.detectedLanguage,
+    });
+
+    // Step 2: Translation (Mizan)
+    const translationStart = Date.now();
+    const translationResult = await this.translationProvider!.translate({
+      text: transcription,
+      sourceLanguage: this.config.sourceLanguage,
+      targetLanguage: this.config.targetLanguage,
+    });
+    this.totalTranslationLatencyMs += Date.now() - translationStart;
+
+    const translation = translationResult.text;
+
+    if (!translation || translation.trim() === "") {
+      logger.debug("Empty translation result", {
+        chunkId: chunk.chunkId,
+      });
+      throw new Error("Empty translation result");
+    }
+
+    logger.debug("Translation completed (Mizan)", {
+      chunkId: chunk.chunkId,
+      translation: translation.substring(0, 50),
+    });
+
+    // Step 3: Text-to-Speech (ElevenLabs)
+    const ttsStart = Date.now();
+    const ttsResult = await this.ttsProvider!.synthesize({
+      text: translation,
+      language: this.config.targetLanguage,
+      speed: this.config.ttsSpeed,
+      outputFormat: "mp3",
+    });
+    this.totalTtsLatencyMs += Date.now() - ttsStart;
+
+    logger.debug("TTS completed (ElevenLabs)", {
+      chunkId: chunk.chunkId,
+      audioSize: ttsResult.audioBuffer.byteLength,
+    });
+
+    // Save TTS audio for debugging if debug mode is enabled
+    if (this.config.debugMode) {
+      this.saveTTSDebugFile(
+        chunk.chunkId,
+        ttsResult.audioBuffer,
+        transcription,
+        translation,
+      );
+    }
+
+    return {
+      transcription,
+      translation,
+      audioBuffer: ttsResult.audioBuffer,
+    };
+  }
+
+  /**
+   * Runs pipeline with Mizan for all stages (legacy mode).
+   */
+  private async runPipelineWithMizan(chunk: AudioChunk): Promise<{
+    transcription: string;
+    translation: string;
+    audioBuffer: ArrayBuffer;
+  }> {
+    if (!this.mizanClient) {
+      throw new Error("Mizan client not initialized");
+    }
+
     // Step 1: Speech-to-Text
     const sttStart = Date.now();
     const sttResult = await this.mizanClient.transcribe({
@@ -656,6 +802,9 @@ export class TranslationPipeline extends EventEmitter {
    */
   private isRetryableError(error: unknown): boolean {
     if (error instanceof MizanError) {
+      return error.retryable;
+    }
+    if (error instanceof ProviderError) {
       return error.retryable;
     }
     if (error instanceof CircuitOpenError) {

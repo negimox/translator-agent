@@ -59,7 +59,14 @@ export interface AgentConfig {
   chromeDevtools: boolean;
 
   // ============================================================================
-  // Mizan API settings (Phase 4)
+  // ElevenLabs API settings (Phase 7.1)
+  // ============================================================================
+  elevenLabsApiKey: string;
+  elevenLabsBaseUrl: string;
+  elevenLabsTimeoutMs: number;
+
+  // ============================================================================
+  // Mizan API settings (Phase 4, Translation only in Phase 7.1+)
   // ============================================================================
   mizanBaseUrl: string;
   mizanUsername: string;
@@ -97,7 +104,6 @@ export interface AgentConfig {
   logLevel: "debug" | "info" | "warn" | "error";
 }
 
-
 /**
  * Loads and validates the agent configuration from environment variables.
  */
@@ -131,7 +137,10 @@ export function loadConfig(): AgentConfig {
     vadSilenceCoalesceMs: parseIntEnv(process.env.VAD_SILENCE_COALESCE_MS, 250),
 
     // Chunk aggregation settings (Phase 3)
-    targetChunkDurationMs: parseIntEnv(process.env.TARGET_CHUNK_DURATION_MS, 900),
+    targetChunkDurationMs: parseIntEnv(
+      process.env.TARGET_CHUNK_DURATION_MS,
+      900,
+    ),
     minChunkDurationMs: parseIntEnv(process.env.MIN_CHUNK_DURATION_MS, 300),
     maxChunkDurationMs: parseIntEnv(process.env.MAX_CHUNK_DURATION_MS, 3000),
     sampleRate: parseIntEnv(process.env.AUDIO_SAMPLE_RATE, 48000),
@@ -152,7 +161,15 @@ export function loadConfig(): AgentConfig {
     chromeDevtools: parseBoolEnv(process.env.CHROME_DEVTOOLS, false),
 
     // ============================================================================
-    // Mizan API settings (Phase 4)
+    // ElevenLabs API settings (Phase 7.1)
+    // ============================================================================
+    elevenLabsApiKey: process.env.ELEVENLABS_API_KEY || "",
+    elevenLabsBaseUrl:
+      process.env.ELEVENLABS_BASE_URL || "https://api.elevenlabs.io/v1",
+    elevenLabsTimeoutMs: parseIntEnv(process.env.ELEVENLABS_TIMEOUT_MS, 30000),
+
+    // ============================================================================
+    // Mizan API settings (Phase 4, Translation only in Phase 7.1+)
     // ============================================================================
     mizanBaseUrl:
       process.env.MIZAN_BASE_URL || "https://platform.mizanlabs.com/api/v1",

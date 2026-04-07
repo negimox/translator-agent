@@ -30,6 +30,7 @@ import {
   PipelineResult,
   CircuitState,
 } from "../mizan";
+import { getProviderFactory } from "../providers";
 
 const logger = createLogger("TranslatorAgent");
 
@@ -283,10 +284,29 @@ export class TranslatorAgent {
   }
 
   /**
-   * Phase 4: Initializes the translation pipeline.
+   * Phase 4/7.1: Initializes the translation pipeline.
+   * In Phase 7.1, supports both ElevenLabs+Mizan and legacy Mizan-only modes.
    */
   private async initializeTranslationPipeline(): Promise<void> {
-    // Validate Mizan credentials
+    // Phase 7.1: Determine provider mode based on ElevenLabs API key
+    const useElevenLabs = !!this.config.elevenLabsApiKey;
+    let providerFactory;
+
+    if (useElevenLabs) {
+      try {
+        providerFactory = getProviderFactory();
+        logger.info(
+          "Using ElevenLabs for STT/TTS + Mizan for Translation (Phase 7.1)",
+        );
+      } catch (error) {
+        logger.warn(
+          "ProviderFactory not initialized, falling back to legacy Mizan mode",
+          { error: String(error) },
+        );
+      }
+    }
+
+    // Validate Mizan credentials (required for translation in both modes)
     if (!this.config.mizanUsername || !this.config.mizanPassword) {
       logger.warn(
         "Mizan credentials not configured - translation pipeline disabled",
@@ -296,6 +316,11 @@ export class TranslatorAgent {
 
     // Create translation pipeline
     this.translationPipeline = new TranslationPipeline({
+      // Provider configuration (Phase 7.1)
+      providerFactory,
+      useElevenLabs,
+
+      // Mizan configuration (used for translation in Phase 7.1, all in legacy mode)
       mizan: {
         baseUrl: this.config.mizanBaseUrl,
         username: this.config.mizanUsername,

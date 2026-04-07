@@ -8,6 +8,15 @@ This agent joins Jitsi meetings as a special participant (`translator-<lang>`) a
 
 ## Features
 
+### Phase 7.1 (Completed) - ElevenLabs Integration
+
+- **Multi-Provider Architecture**: Abstraction layer supporting multiple STT/TTS/Translation providers
+- **ElevenLabs STT**: Scribe v2 for speech-to-text (90+ languages including Arabic and Urdu)
+- **ElevenLabs TTS**: High-quality text-to-speech with voice selection per language
+- **Extended Language Support**: Added Arabic (ar) and Urdu (ur) to existing English/Hindi
+- **Hybrid Pipeline**: ElevenLabs for STT/TTS, Mizan for translation
+- **Backward Compatibility**: Legacy Mizan-only mode still supported
+
 ### Phase 2 (Completed)
 
 - **Headless Chrome**: Puppeteer-controlled Chrome with proper WebRTC support
@@ -40,6 +49,7 @@ This agent joins Jitsi meetings as a special participant (`translator-<lang>`) a
    ```
 
 3. **Start the agent**:
+
    ```bash
    npm start
    ```
@@ -55,12 +65,13 @@ This agent joins Jitsi meetings as a special participant (`translator-<lang>`) a
 
 ### Optional - General
 
-| Variable          | Default | Description                                      |
-| ----------------- | ------- | ------------------------------------------------ |
-| `TARGET_LANGUAGE` | `en`    | Language code for this agent (`en`, `hi`)        |
-| `HEALTH_PORT`     | `8080`  | Health check server port                         |
-| `CHROME_HEADLESS` | `true`  | Run Chrome in headless mode                      |
-| `LOG_LEVEL`       | `info`  | Logging level (`debug`, `info`, `warn`, `error`) |
+| Variable          | Default | Description                                                |
+| ----------------- | ------- | ---------------------------------------------------------- |
+| `TARGET_LANGUAGE` | `en`    | Language code for this agent (`en`, `hi`, `ar`, `ur`)      |
+| `SOURCE_LANGUAGE` | `en`    | Source language for STT (auto-detect if not specified)     |
+| `HEALTH_PORT`     | `8080`  | Health check server port                                   |
+| `CHROME_HEADLESS` | `true`  | Run Chrome in headless mode                                |
+| `LOG_LEVEL`       | `info`  | Logging level (`debug`, `info`, `warn`, `error`)           |
 
 ### Optional - VAD (Phase 3)
 
@@ -87,6 +98,24 @@ This agent joins Jitsi meetings as a special participant (`translator-<lang>`) a
 | `DEBUG_OUTPUT_DIR` | `./debug_chunks` | Directory for debug chunks |
 | `MAX_DEBUG_CHUNKS` | `100`            | Max debug chunks to save   |
 
+### Optional - ElevenLabs API (Phase 7.1)
+
+| Variable                  | Default                           | Description                                  |
+| ------------------------- | --------------------------------- | -------------------------------------------- |
+| `ELEVENLABS_API_KEY`      | *(required for Phase 7.1)*        | ElevenLabs API key for STT/TTS               |
+| `ELEVENLABS_BASE_URL`     | `https://api.elevenlabs.io/v1`    | ElevenLabs API base URL                      |
+| `ELEVENLABS_TIMEOUT_MS`   | `30000`                           | API request timeout in milliseconds          |
+
+### Optional - Mizan API (Phase 4, Translation only in Phase 7.1+)
+
+| Variable                        | Default                                    | Description                                  |
+| ------------------------------- | ------------------------------------------ | -------------------------------------------- |
+| `MIZAN_BASE_URL`                | `https://platform.mizanlabs.com/api/v1`    | Mizan API base URL                           |
+| `MIZAN_USERNAME`                | *(required)*                               | Mizan API username (Basic Auth)              |
+| `MIZAN_PASSWORD`                | *(required)*                               | Mizan API password (Basic Auth)              |
+| `MIZAN_TIMEOUT_MS`              | `30000`                                    | API request timeout in milliseconds          |
+| `TRANSLATION_TEMPLATE_PATTERN`  | `translator_{target}`                      | Translation template name pattern            |
+
 ## Health Endpoints
 
 - `GET /healthz` - Liveness probe (is Chrome running?)
@@ -103,7 +132,24 @@ TARGET_LANGUAGE=en ROOM_NAME=test HEALTH_PORT=8080 npm start
 
 # Agent for Hindi (in separate terminal/container)
 TARGET_LANGUAGE=hi ROOM_NAME=test HEALTH_PORT=8081 npm start
+
+# Agent for Arabic (Phase 7.1+)
+TARGET_LANGUAGE=ar ROOM_NAME=test HEALTH_PORT=8082 npm start
+
+# Agent for Urdu (Phase 7.1+)
+TARGET_LANGUAGE=ur ROOM_NAME=test HEALTH_PORT=8083 npm start
 ```
+
+## Supported Languages (Phase 7.1)
+
+| Language | Code | STT Support | Translation Support | TTS Support | Voice |
+|----------|------|-------------|-------------------|-------------|-------|
+| English  | `en` | ✅ ElevenLabs | ✅ Mizan | ✅ ElevenLabs | Roger (Flash v2.5) |
+| Hindi    | `hi` | ✅ ElevenLabs | ✅ Mizan | ✅ ElevenLabs | Nichalia (Flash v2.5) |
+| Arabic   | `ar` | ✅ ElevenLabs | ✅ Mizan | ✅ ElevenLabs | Sarah (Multilingual v2) |
+| Urdu     | `ur` | ✅ ElevenLabs | ✅ Mizan | ✅ ElevenLabs | Sarah (eleven_v3) |
+
+**Note:** When `ELEVENLABS_API_KEY` is provided, the agent uses ElevenLabs for STT/TTS and Mizan for translation. Without the key, it falls back to Mizan-only mode (English and Hindi only).
 
 ## Architecture
 

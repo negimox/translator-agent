@@ -14,6 +14,7 @@ import { loadConfig, getDisplayName, getMeetingUrl } from "./config";
 import { createLogger } from "./logger";
 import { TranslatorAgent } from "./agent/TranslatorAgent";
 import { HealthServer } from "./health/HealthServer";
+import { initializeProviderFactory } from "./providers";
 
 const logger = createLogger("Main");
 
@@ -69,6 +70,36 @@ async function main(): Promise<void> {
   } catch (error) {
     logger.error("Failed to load configuration", { error: String(error) });
     process.exit(1);
+  }
+
+  // Phase 7.1: Initialize provider factory for ElevenLabs + Mizan
+  try {
+    const providerFactory = initializeProviderFactory({
+      elevenlabs: {
+        apiKey: config.elevenLabsApiKey,
+        baseUrl: config.elevenLabsBaseUrl,
+        timeoutMs: config.elevenLabsTimeoutMs,
+      },
+      mizan: {
+        username: config.mizanUsername,
+        password: config.mizanPassword,
+        baseUrl: config.mizanBaseUrl,
+        timeoutMs: config.mizanTimeoutMs,
+        templatePattern: config.translationTemplatePattern,
+      },
+    });
+
+    logger.info("Provider factory initialized", {
+      hasElevenLabs: !!config.elevenLabsApiKey,
+      hasMizan: !!(config.mizanUsername && config.mizanPassword),
+    });
+
+    // Check provider health on startup
+    const health = await providerFactory.checkAllHealth();
+    logger.info("Provider health check", { health });
+  } catch (error) {
+    logger.error("Failed to initialize providers", { error: String(error) });
+    // Continue anyway - providers will be created lazily
   }
 
   // Create and start the agent

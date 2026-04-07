@@ -72,13 +72,16 @@ export function loadOrchestratorConfig(): OrchestratorConfig {
     maxRestartsPerWindow: parseIntEnv(process.env.MAX_RESTARTS_PER_WINDOW, 3),
     restartWindowMs: parseIntEnv(process.env.RESTART_WINDOW_MS, 600000),
 
+    // Global token bucket shared across all agents
+    // Each agent needs 3 tokens for FULL_PIPELINE (STT + Translation + TTS)
+    // Default capacity of 12 supports up to 4 concurrent agents (12/4 = 3 tokens each)
     globalTokenBucketCapacity: parseIntEnv(
       process.env.GLOBAL_TOKEN_BUCKET_CAPACITY,
-      8,
+      12,
     ),
     globalTokenBucketRefillRate: parseIntEnv(
       process.env.GLOBAL_TOKEN_BUCKET_REFILL_RATE,
-      8,
+      12,
     ),
 
     mizanBaseUrl:

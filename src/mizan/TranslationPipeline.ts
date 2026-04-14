@@ -518,6 +518,44 @@ export class TranslationPipeline extends EventEmitter {
   }
 
   /**
+   * Checks if a transcription should be skipped.
+   * Filters out non-speech artifacts and filler-only micro-transcriptions
+   * that produce garbled or meaningless TTS output.
+   */
+  private shouldSkipTranscription(text: string): boolean {
+    const trimmed = text.trim();
+
+    // Skip non-speech artifacts: [clicking], [music], [applause], etc.
+    if (/^\[.*\]$/.test(trimmed)) return true;
+
+    // Skip very short transcriptions (< 3 words) that are all fillers
+    const words = trimmed.split(/\s+/).filter((w) => w.length > 0);
+    if (words.length < 3) {
+      const FILLERS = new Set([
+        "yeah",
+        "um",
+        "uh",
+        "okay",
+        "ok",
+        "hmm",
+        "hm",
+        "ah",
+        "oh",
+        "right",
+        "so",
+        "like",
+        "well",
+        "mhm",
+        "dialogue",
+      ]);
+      const allFillers = words.every((w) => FILLERS.has(w.toLowerCase()));
+      if (allFillers) return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Runs pipeline with ElevenLabs STT/TTS + Mizan Translation (Phase 7.1).
    */
   private async runPipelineWithProviders(chunk: AudioChunk): Promise<{
@@ -540,6 +578,15 @@ export class TranslationPipeline extends EventEmitter {
       logger.debug("Empty transcription result, skipping chunk", {
         chunkId: chunk.chunkId,
         provider: this.sttProvider!.name,
+      });
+      throw new Error("Empty transcription result");
+    }
+
+    // Filter non-speech artifacts and filler-only transcriptions
+    if (this.shouldSkipTranscription(transcription)) {
+      logger.debug("Skipping non-speech/filler transcription", {
+        chunkId: chunk.chunkId,
+        transcription,
       });
       throw new Error("Empty transcription result");
     }
@@ -632,6 +679,15 @@ export class TranslationPipeline extends EventEmitter {
       logger.debug("Empty transcription result, skipping chunk", {
         chunkId: chunk.chunkId,
         rawAsrResult: sttResult.asrResult,
+      });
+      throw new Error("Empty transcription result");
+    }
+
+    // Filter non-speech artifacts and filler-only transcriptions
+    if (this.shouldSkipTranscription(transcription)) {
+      logger.debug("Skipping non-speech/filler transcription", {
+        chunkId: chunk.chunkId,
+        transcription,
       });
       throw new Error("Empty transcription result");
     }

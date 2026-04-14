@@ -50,10 +50,10 @@ export interface ChunkAggregatorConfig {
 export const DEFAULT_CHUNK_CONFIG: ChunkAggregatorConfig = {
   agentId: "translator-unknown",
   sampleRate: 48000,
-  vadRmsThreshold: 0.01, // -40dB, sensitive to speech
-  vadSilenceCoalesceMs: 250, // Coalesce utterances < 250ms apart
-  targetChunkDurationMs: 900, // 900ms default chunk
-  minChunkDurationMs: 300, // Don't send chunks < 300ms
+  vadRmsThreshold: 0.015, // ~-36dB, slightly less sensitive to filter ambient noise
+  vadSilenceCoalesceMs: 500, // Coalesce utterances < 500ms apart (natural speech pauses are 300-500ms)
+  targetChunkDurationMs: 2000, // 2s target chunk for better STT context
+  minChunkDurationMs: 1500, // Don't send chunks < 1.5s (prevents filler-only micro-chunks)
   maxChunkDurationMs: 3000, // Max 3 seconds
   adaptiveChunkingEnabled: false, // Disabled until Phase 4
   debugMode: false,

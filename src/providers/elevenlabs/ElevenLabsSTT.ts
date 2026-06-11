@@ -81,10 +81,19 @@ export class ElevenLabsSTT implements ISTTProvider {
     // Model selection
     formData.append("model_id", ELEVENLABS_STT_MODELS.SCRIBE_V2);
 
-    // Language hint (optional but improves accuracy)
-    if (request.language) {
-      formData.append("language_code", request.language);
-    }
+    // Do NOT pass language_code — let Scribe v2 auto-detect the spoken language.
+    // In a multilingual room, the agent captures audio from ALL participants
+    // regardless of their language, so a fixed hint (e.g. "en") would cause
+    // Scribe to force-transcribe non-English speech as English, producing
+    // garbled output. Auto-detection is more accurate for this use case.
+
+    // Remove filler words (Yeah, Um, Uh) and false starts at model level
+    // This produces cleaner text for the translation LLM
+    formData.append("remove_disfluencies", "true");
+
+    // Don't tag audio events ([clicking], [music]) — we filter them anyway
+    // and suppressing at source avoids wasting pipeline cycles
+    formData.append("tag_audio_events", "false");
 
     logger.debug("Sending STT request", {
       url,

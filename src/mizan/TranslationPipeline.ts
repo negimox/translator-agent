@@ -191,6 +191,9 @@ export class TranslationPipeline extends EventEmitter {
   private isRunning: boolean = false;
   private processInterval: NodeJS.Timeout | null = null;
 
+  // Rolling context for translation continuity across chunks
+  private previousTranscription: string = "";
+
   // Metrics
   private totalChunksReceived: number = 0;
   private totalChunksProcessed: number = 0;
@@ -525,8 +528,19 @@ export class TranslationPipeline extends EventEmitter {
   private shouldSkipTranscription(text: string): boolean {
     const trimmed = text.trim();
 
+    // Skip very short text (< 3 chars) — not enough content to translate
+    if (trimmed.length < 3) return true;
+
     // Skip non-speech artifacts: [clicking], [music], [applause], etc.
     if (/^\[.*\]$/.test(trimmed)) return true;
+
+    // Skip partial bracket annotations or short bracketed text
+    // e.g. "[background" (truncated), "[clicking sound"
+    if (/^\[/.test(trimmed) && trimmed.length < 30) return true;
+
+    // Skip common noise-only descriptions that Scribe sometimes returns
+    // without brackets (e.g. when tag_audio_events was enabled)
+    if (/^(background noise|mouse click|keyboard|clicking)/i.test(trimmed)) return true;
 
     // Skip very short transcriptions (< 3 words) that are all fillers
     const words = trimmed.split(/\s+/).filter((w) => w.length > 0);
@@ -547,6 +561,8 @@ export class TranslationPipeline extends EventEmitter {
         "well",
         "mhm",
         "dialogue",
+        "mm",
+        "mh",
       ]);
       const allFillers = words.every((w) => FILLERS.has(w.toLowerCase()));
       if (allFillers) return true;
@@ -564,10 +580,13 @@ export class TranslationPipeline extends EventEmitter {
     audioBuffer: ArrayBuffer;
   }> {
     // Step 1: Speech-to-Text (ElevenLabs)
+    // Language hint is intentionally omitted — Scribe v2 auto-detects the
+    // spoken language. In a multilingual room the agent captures ALL audio,
+    // so a fixed hint would force-transcribe non-matching speech incorrectly.
     const sttStart = Date.now();
     const sttResult = await this.sttProvider!.transcribe({
       audioBuffer: chunk.wavBuffer,
-      language: this.config.sourceLanguage,
+      language: "", // empty = auto-detect (ElevenLabsSTT ignores empty)
       vadFilter: true,
     });
     this.totalSttLatencyMs += Date.now() - sttStart;
@@ -589,6 +608,22 @@ export class TranslationPipeline extends EventEmitter {
         transcription,
       });
       throw new Error("Empty transcription result");
+    }
+
+    // Skip if detected language matches target — no translation needed.
+    // e.g. if this is the "en" agent and the speaker is already speaking English.
+    const detectedLang = sttResult.detectedLanguage;
+    if (detectedLang) {
+      const mapped = this.mapLanguageCode(detectedLang);
+      if (mapped === this.config.targetLanguage) {
+        logger.debug("Detected language matches target, skipping chunk", {
+          chunkId: chunk.chunkId,
+          detectedLanguage: detectedLang,
+          mapped,
+          targetLanguage: this.config.targetLanguage,
+        });
+        throw new Error("Empty transcription result");
+      }
     }
 
     logger.debug("STT completed (ElevenLabs)", {
@@ -644,6 +679,9 @@ export class TranslationPipeline extends EventEmitter {
         translation,
       );
     }
+
+    // Update rolling context for next chunk
+    this.previousTranscription = transcription;
 
     return {
       transcription,
@@ -747,6 +785,9 @@ export class TranslationPipeline extends EventEmitter {
         translation,
       );
     }
+
+    // Update rolling context for next chunk
+    this.previousTranscription = transcription;
 
     return {
       transcription,
@@ -988,6 +1029,43 @@ export class TranslationPipeline extends EventEmitter {
    */
   getCircuitBreaker(): CircuitBreaker {
     return this.circuitBreaker;
+  }
+
+  /**
+   * Maps ElevenLabs ISO 639-3 language codes to our 2-letter codes.
+   * Scribe v2 returns codes like "eng", "hin", "urd", "arb".
+   */
+  private mapLanguageCode(iso3: string): string {
+    const map: Record<string, string> = {
+      eng: "en",
+      hin: "hi",
+      urd: "ur",
+      arb: "ar",
+      ara: "ar",
+      spa: "es",
+      fra: "fr",
+      deu: "de",
+      ita: "it",
+      por: "pt",
+      rus: "ru",
+      jpn: "ja",
+      kor: "ko",
+      zho: "zh",
+      nld: "nl",
+      pol: "pl",
+      tur: "tr",
+      vie: "vi",
+      tha: "th",
+      ind: "id",
+      msa: "ms",
+      tam: "ta",
+      tel: "te",
+      ben: "bn",
+      guj: "gu",
+      mar: "mr",
+      pan: "pa",
+    };
+    return map[iso3] || iso3.substring(0, 2);
   }
 
   /**

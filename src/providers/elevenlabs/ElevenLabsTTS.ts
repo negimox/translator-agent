@@ -28,13 +28,13 @@ const logger = createLogger("ElevenLabsTTS");
 interface ElevenLabsTTSBody {
   text: string;
   model_id: string;
+  language_code?: string;
   voice_settings?: {
     stability?: number;
     similarity_boost?: number;
     style?: number;
     use_speaker_boost?: boolean;
   };
-  output_format?: string;
 }
 
 /**
@@ -88,19 +88,20 @@ export class ElevenLabsTTS implements ITTSProvider {
     const voiceId = request.voiceId || voiceConfig.voiceId;
     const model = voiceConfig.model;
 
-    const url = `${this.config.baseUrl}${ELEVENLABS_API.TTS_ENDPOINT}/${voiceId}`;
+    const outputFormat =
+      OUTPUT_FORMAT_MAP[request.outputFormat || "mp3"] || "mp3_44100_128";
+    const url = `${this.config.baseUrl}${ELEVENLABS_API.TTS_ENDPOINT}/${voiceId}?output_format=${outputFormat}`;
 
     const body: ElevenLabsTTSBody = {
       text: request.text,
       model_id: model,
+      language_code: request.language,
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,
         style: 0,
         use_speaker_boost: true,
       },
-      output_format:
-        OUTPUT_FORMAT_MAP[request.outputFormat || "mp3"] || "mp3_44100_128",
     };
 
     logger.debug("Sending TTS request", {
@@ -175,19 +176,20 @@ export class ElevenLabsTTS implements ITTSProvider {
     const model = voiceConfig.model;
 
     // Use streaming endpoint
-    const url = `${this.config.baseUrl}${ELEVENLABS_API.TTS_ENDPOINT}/${voiceId}/stream`;
+    const outputFormat =
+      OUTPUT_FORMAT_MAP[request.outputFormat || "mp3"] || "mp3_44100_128";
+    const url = `${this.config.baseUrl}${ELEVENLABS_API.TTS_ENDPOINT}/${voiceId}/stream?output_format=${outputFormat}`;
 
     const body: ElevenLabsTTSBody = {
       text: request.text,
       model_id: model,
+      language_code: request.language,
       voice_settings: {
         stability: 0.5,
         similarity_boost: 0.75,
         style: 0,
         use_speaker_boost: true,
       },
-      output_format:
-        OUTPUT_FORMAT_MAP[request.outputFormat || "mp3"] || "mp3_44100_128",
     };
 
     logger.debug("Sending streaming TTS request", {

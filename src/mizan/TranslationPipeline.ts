@@ -611,19 +611,6 @@ export class TranslationPipeline extends EventEmitter {
       throw new Error("Empty transcription result");
     }
 
-    // Skip low-confidence STT results — unreliable transcriptions produce
-    // garbage translations. E.g. "Is my wa" detected as Swahili (confidence 0.83)
-    const sttConfidence = sttResult.confidence;
-    if (sttConfidence !== undefined && sttConfidence < 0.85) {
-      logger.debug("Low STT confidence, skipping chunk", {
-        chunkId: chunk.chunkId,
-        transcription: transcription.substring(0, 50),
-        confidence: sttConfidence,
-        detectedLanguage: sttResult.detectedLanguage,
-      });
-      throw new Error("Empty transcription result");
-    }
-
     // Skip if detected language matches target — no translation needed.
     // e.g. if this is the "en" agent and the speaker is already speaking English.
     const detectedLang = sttResult.detectedLanguage;

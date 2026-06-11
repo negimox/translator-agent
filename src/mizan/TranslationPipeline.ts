@@ -528,8 +528,9 @@ export class TranslationPipeline extends EventEmitter {
   private shouldSkipTranscription(text: string): boolean {
     const trimmed = text.trim();
 
-    // Skip very short text (< 3 chars) — not enough content to translate
-    if (trimmed.length < 3) return true;
+    // Skip very short text (< 10 chars) — fragments like "Is my wa" produce
+    // garbage translations and waste API calls
+    if (trimmed.length < 10) return true;
 
     // Skip non-speech artifacts: [clicking], [music], [applause], etc.
     if (/^\[.*\]$/.test(trimmed)) return true;
@@ -606,6 +607,19 @@ export class TranslationPipeline extends EventEmitter {
       logger.debug("Skipping non-speech/filler transcription", {
         chunkId: chunk.chunkId,
         transcription,
+      });
+      throw new Error("Empty transcription result");
+    }
+
+    // Skip low-confidence STT results — unreliable transcriptions produce
+    // garbage translations. E.g. "Is my wa" detected as Swahili (confidence 0.83)
+    const sttConfidence = sttResult.confidence;
+    if (sttConfidence !== undefined && sttConfidence < 0.85) {
+      logger.debug("Low STT confidence, skipping chunk", {
+        chunkId: chunk.chunkId,
+        transcription: transcription.substring(0, 50),
+        confidence: sttConfidence,
+        detectedLanguage: sttResult.detectedLanguage,
       });
       throw new Error("Empty transcription result");
     }

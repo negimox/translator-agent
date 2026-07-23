@@ -139,7 +139,7 @@ export class MizanTranslation implements ITranslationProvider {
         { role: "user", content: wrappedText },
       ],
       temperature: 0.3, // Low temperature for consistent, faithful translations
-      max_tokens: 768, // Increased from 512 to accommodate context in system prompt
+      max_tokens: 1024, // Increased from 768 to accommodate context in system prompt without truncating
     };
 
     logger.debug("Sending translation request (passthrough)", {

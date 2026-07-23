@@ -672,7 +672,37 @@ export class TranslationPipeline extends EventEmitter {
     });
     this.totalTranslationLatencyMs += Date.now() - translationStart;
 
-    const translation = translationResult.text;
+    // Step 2b: Check for CJK contamination (Qwen 2.5-7B issue) and retry once
+    let translation = translationResult.text;
+    const cjkRegex = /[\u4E00-\u9FFF\u3400-\u4DBF]/;
+    if (cjkRegex.test(translation)) {
+      logger.warn("CJK contamination detected in translation, retrying", {
+        chunkId: chunk.chunkId,
+        originalTranslation: translation.substring(0, 50),
+      });
+      const retryResult = await this.translationProvider!.translate({
+        text: transcription,
+        sourceLanguage: this.config.sourceLanguage,
+        targetLanguage: this.config.targetLanguage,
+        conversationContext: contextBlock || undefined,
+      });
+      if (retryResult.text && !cjkRegex.test(retryResult.text)) {
+        translation = retryResult.text;
+        logger.info("CJK retry succeeded", {
+          chunkId: chunk.chunkId,
+          retryTranslation: translation.substring(0, 50),
+        });
+      } else {
+        logger.warn("CJK retry also contaminated, stripping CJK chars", {
+          chunkId: chunk.chunkId,
+        });
+        // Use the retry result if available, otherwise the original
+        translation = (retryResult.text || translation).replace(
+          /[\u4E00-\u9FFF\u3400-\u4DBF\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF]/g,
+          "",
+        ).trim();
+      }
+    }
 
     if (!translation || translation.trim() === "") {
       logger.debug("Empty translation result", {
@@ -687,7 +717,7 @@ export class TranslationPipeline extends EventEmitter {
       contextUsed: !!contextBlock,
     });
 
-    // Step 2b: Validate translation quality
+    // Step 2c: Validate translation quality
     const validatedTranslation = this.validateTranslation(
       translation,
       transcription,
@@ -753,6 +783,21 @@ export class TranslationPipeline extends EventEmitter {
   ): string {
     let cleaned = translation;
     const issues: string[] = [];
+
+    // Check 0: CJK contamination in any non-CJK target language
+    // Qwen 2.5-7B occasionally injects Chinese characters when uncertain
+    if (["hi", "ur", "ar", "en"].includes(targetLanguage)) {
+      const cjkRegex =
+        /[\u4E00-\u9FFF\u3400-\u4DBF\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF]/g;
+      const cjkMatches = cleaned.match(cjkRegex);
+      if (cjkMatches) {
+        issues.push(
+          `CJK chars in ${targetLanguage} output: ${cjkMatches.join("")}`,
+        );
+        cleaned = cleaned.replace(cjkRegex, "");
+        cleaned = cleaned.replace(/^\s+/, "").replace(/\s+/g, " ").trim();
+      }
+    }
 
     // Check 1: Devanagari contamination in Urdu output
     if (targetLanguage === "ur") {

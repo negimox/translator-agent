@@ -41,6 +41,8 @@ export interface TranslationRequest {
   sourceLanguage: string;
   /** Target language code */
   targetLanguage: string;
+  /** Optional conversation context for continuity across chunks */
+  conversationContext?: string;
 }
 
 /**

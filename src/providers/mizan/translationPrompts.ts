@@ -34,6 +34,14 @@ CRITICAL — Anti-hallucination rules:
 - Example: "उसमें अभी भी" → "In that, still" (NOT "She still has fever.")
 - Example: "ابھی بخار" → "Fever right now" (NOT "He still has a fever.")
 
+Context handling rules:
+- You may receive recent conversation history above the text to translate.
+- Use this context ONLY to resolve ambiguity: pronouns, partial phrases, consistent terminology.
+- Do NOT repeat, summarize, or translate the context. It is reference only.
+- Do NOT let context override what is explicitly said in the current text.
+- If the current text contradicts the context, follow the current text.
+- Output ONLY the translation of the text after "Text to translate:".
+
 Translate meaning, not word-for-word for idioms:
   "तकलीफ़ है" / "تکلیف ہے" → "I am in pain"
   "तबीयत ठीक नहीं" / "طبیعت ٹھیک نہیں" → "I am not feeling well"
@@ -74,6 +82,14 @@ CRITICAL — Anti-hallucination rules:
 - Do NOT add subjects, objects, verbs, or context not in the source.
 - Do NOT complete unfinished thoughts or extend the speaker's sentence.
 - If the source says nothing about a topic, do NOT introduce it.
+
+Context handling rules:
+- You may receive recent conversation history above the text to translate.
+- Use this context ONLY to resolve ambiguity: pronouns, partial phrases, consistent terminology.
+- Do NOT repeat, summarize, or translate the context. It is reference only.
+- Do NOT let context override what is explicitly said in the current text.
+- If the current text contradicts the context, follow the current text.
+- Output ONLY the translation of the text after "Text to translate:".
 
 Live transcription rules:
 - Input may be a partial speech-recognition chunk.
@@ -180,6 +196,14 @@ CRITICAL — Anti-hallucination rules:
 - Do NOT add subjects, objects, verbs, or context not in the source.
 - Do NOT complete unfinished thoughts or extend the speaker's sentence.
 - If the source says nothing about a topic, do NOT introduce it.
+
+Context handling rules:
+- You may receive recent conversation history above the text to translate.
+- Use this context ONLY to resolve ambiguity: pronouns, partial phrases, consistent terminology.
+- Do NOT repeat, summarize, or translate the context. It is reference only.
+- Do NOT let context override what is explicitly said in the current text.
+- If the current text contradicts the context, follow the current text.
+- Output ONLY the translation of the text after "Text to translate:".
 
 CRITICAL — Script purity rules (MUST follow):
 - Output MUST contain ZERO Devanagari characters (Unicode \\u0900-\\u097F). Check every character.
@@ -292,6 +316,14 @@ CRITICAL — Anti-hallucination rules:
 - Do NOT add subjects, objects, verbs, or context not in the source.
 - Do NOT complete unfinished thoughts or extend the speaker's sentence.
 - If the source says nothing about a topic, do NOT introduce it.
+
+Context handling rules:
+- You may receive recent conversation history above the text to translate.
+- Use this context ONLY to resolve ambiguity: pronouns, partial phrases, consistent terminology.
+- Do NOT repeat, summarize, or translate the context. It is reference only.
+- Do NOT let context override what is explicitly said in the current text.
+- If the current text contradicts the context, follow the current text.
+- Output ONLY the translation of the text after "Text to translate:".
 
 Live transcription rules:
 - Input may be a partial speech-recognition chunk.

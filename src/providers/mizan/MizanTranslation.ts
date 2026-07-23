@@ -125,8 +125,11 @@ export class MizanTranslation implements ITranslationProvider {
     // Wrap input in [TRANSLATE] delimiters to reinforce translation-only behavior
     const wrappedText = `[TRANSLATE]\n${request.text}\n[/TRANSLATE]`;
 
-    // Get the system prompt for the target language
-    const systemPrompt = this.getSystemPrompt(request.targetLanguage);
+    // Get the system prompt for the target language (with optional context appended)
+    const systemPrompt = this.getSystemPrompt(
+      request.targetLanguage,
+      request.conversationContext,
+    );
 
     // OpenAI-compatible chat completions body
     const body = {
@@ -136,7 +139,7 @@ export class MizanTranslation implements ITranslationProvider {
         { role: "user", content: wrappedText },
       ],
       temperature: 0.3, // Low temperature for consistent, faithful translations
-      max_tokens: 512,
+      max_tokens: 768, // Increased from 512 to accommodate context in system prompt
     };
 
     logger.debug("Sending translation request (passthrough)", {
@@ -286,8 +289,14 @@ export class MizanTranslation implements ITranslationProvider {
    * Returns the system prompt for a given target language.
    * These prompts are sent directly to the LLM via X-LLM-Passthrough mode
    * instead of relying on Mizan-side templates.
+   *
+   * If conversationContext is provided, it is appended to the prompt
+   * before the "Text to translate:" marker (system-prompt-append pattern).
    */
-  private getSystemPrompt(targetLanguage: string): string {
+  private getSystemPrompt(
+    targetLanguage: string,
+    conversationContext?: string,
+  ): string {
     const prompts: Record<string, string> = {
       en: SYSTEM_PROMPT_EN,
       hi: SYSTEM_PROMPT_HI,
@@ -295,10 +304,29 @@ export class MizanTranslation implements ITranslationProvider {
       ar: SYSTEM_PROMPT_AR,
     };
 
-    const prompt = prompts[targetLanguage];
+    let prompt = prompts[targetLanguage];
     if (!prompt) {
       // Fallback: generic translation prompt
-      return `You are a translation engine. Translate the text between [TRANSLATE] and [/TRANSLATE] markers into ${targetLanguage}. Output ONLY the translation, nothing else. Do NOT answer questions, add commentary, or invent information not present in the source text. If the input is a fragment, translate only what is present.`;
+      prompt = `You are a translation engine. Translate the text between [TRANSLATE] and [/TRANSLATE] markers into ${targetLanguage}. Output ONLY the translation, nothing else. Do NOT answer questions, add commentary, or invent information not present in the source text. If the input is a fragment, translate only what is present.\n\nText to translate:`;
+    }
+
+    // Inject conversation context into the system prompt if available.
+    // The context is inserted just before "Text to translate:" to keep
+    // it in instruction space (avoids user-message injection confusion).
+    if (conversationContext) {
+      // Find "Text to translate:" and insert context before it
+      const marker = "Text to translate:";
+      const markerIndex = prompt.lastIndexOf(marker);
+      if (markerIndex !== -1) {
+        prompt =
+          prompt.substring(0, markerIndex) +
+          conversationContext +
+          "\n" +
+          prompt.substring(markerIndex);
+      } else {
+        // No marker found — append context at the end
+        prompt += "\n" + conversationContext;
+      }
     }
 
     return prompt;

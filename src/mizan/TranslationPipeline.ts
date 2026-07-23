@@ -41,6 +41,10 @@ import {
 } from "./CircuitBreaker";
 import { ChunkQueue, QueuedChunk } from "./ChunkQueue";
 import {
+  ConversationContext,
+  ConversationContextConfig,
+} from "./ConversationContext";
+import {
   ISTTProvider,
   ITranslationProvider,
   ITTSProvider,
@@ -103,6 +107,12 @@ export interface TranslationPipelineConfig {
   providerFactory?: ProviderFactory;
   /** Use ElevenLabs for STT/TTS (true) or Mizan for all (false) */
   useElevenLabs?: boolean;
+
+  // Conversation context configuration
+  /** Number of recent turns to keep for translation context (default: 5) */
+  contextWindowSize: number;
+  /** Milliseconds after which context is considered stale (default: 30000) */
+  contextStalenessMs: number;
 }
 
 /**
@@ -131,6 +141,9 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   // Provider configuration (Phase 7.1)
   providerFactory: undefined,
   useElevenLabs: false, // Default to legacy Mizan mode for backward compatibility
+  // Conversation context configuration
+  contextWindowSize: 5,
+  contextStalenessMs: 30000,
 };
 
 /**
@@ -191,8 +204,8 @@ export class TranslationPipeline extends EventEmitter {
   private isRunning: boolean = false;
   private processInterval: NodeJS.Timeout | null = null;
 
-  // Rolling context for translation continuity across chunks
-  private previousTranscription: string = "";
+  // Conversation context for translation continuity across chunks
+  private conversationContext: ConversationContext;
 
   // Metrics
   private totalChunksReceived: number = 0;
@@ -244,6 +257,12 @@ export class TranslationPipeline extends EventEmitter {
     this.queue = new ChunkQueue({
       maxQueueLength: this.config.maxQueueLength,
       maxInFlight: this.config.maxInFlight,
+    });
+
+    // Initialize conversation context
+    this.conversationContext = new ConversationContext({
+      windowSize: this.config.contextWindowSize,
+      stalenessMs: this.config.contextStalenessMs,
     });
 
     // Set up event handlers
@@ -343,6 +362,9 @@ export class TranslationPipeline extends EventEmitter {
     // Clear remaining queue
     this.queue.clear();
 
+    // Reset conversation context
+    this.conversationContext.reset();
+
     logger.info("TranslationPipeline stopped", {
       processed: this.totalChunksProcessed,
       dropped: this.totalChunksDropped,
@@ -423,7 +445,7 @@ export class TranslationPipeline extends EventEmitter {
 
     try {
       const result = await this.executeWithRetry(async () => {
-        return this.runPipeline(chunk);
+        return this.runPipeline(chunk, queuedChunk.speakerId);
       }, chunk.chunkId);
 
       const latencyMs = Date.now() - startTime;
@@ -507,16 +529,19 @@ export class TranslationPipeline extends EventEmitter {
    * Runs the full translation pipeline for a chunk.
    * Uses ElevenLabs providers when configured, otherwise falls back to Mizan.
    */
-  private async runPipeline(chunk: AudioChunk): Promise<{
+  private async runPipeline(
+    chunk: AudioChunk,
+    speakerId?: string,
+  ): Promise<{
     transcription: string;
     translation: string;
     audioBuffer: ArrayBuffer;
   }> {
     // Use providers if available (Phase 7.1), otherwise use legacy Mizan client
     if (this.sttProvider && this.translationProvider && this.ttsProvider) {
-      return this.runPipelineWithProviders(chunk);
+      return this.runPipelineWithProviders(chunk, speakerId);
     } else {
-      return this.runPipelineWithMizan(chunk);
+      return this.runPipelineWithMizan(chunk, speakerId);
     }
   }
 
@@ -575,7 +600,10 @@ export class TranslationPipeline extends EventEmitter {
   /**
    * Runs pipeline with ElevenLabs STT/TTS + Mizan Translation (Phase 7.1).
    */
-  private async runPipelineWithProviders(chunk: AudioChunk): Promise<{
+  private async runPipelineWithProviders(
+    chunk: AudioChunk,
+    speakerId?: string,
+  ): Promise<{
     transcription: string;
     translation: string;
     audioBuffer: ArrayBuffer;
@@ -633,12 +661,14 @@ export class TranslationPipeline extends EventEmitter {
       detectedLanguage: sttResult.detectedLanguage,
     });
 
-    // Step 2: Translation (Mizan)
+    // Step 2: Translation (Mizan) — with conversation context
+    const contextBlock = this.conversationContext.getContextBlock();
     const translationStart = Date.now();
     const translationResult = await this.translationProvider!.translate({
       text: transcription,
       sourceLanguage: this.config.sourceLanguage,
       targetLanguage: this.config.targetLanguage,
+      conversationContext: contextBlock || undefined,
     });
     this.totalTranslationLatencyMs += Date.now() - translationStart;
 
@@ -654,6 +684,7 @@ export class TranslationPipeline extends EventEmitter {
     logger.debug("Translation completed (Mizan)", {
       chunkId: chunk.chunkId,
       translation: translation.substring(0, 50),
+      contextUsed: !!contextBlock,
     });
 
     // Step 2b: Validate translation quality
@@ -662,6 +693,14 @@ export class TranslationPipeline extends EventEmitter {
       transcription,
       this.config.targetLanguage,
       chunk.chunkId,
+    );
+
+    // Update conversation context with this turn (before TTS so context
+    // is available even if TTS fails)
+    this.conversationContext.addTurn(
+      transcription,
+      validatedTranslation,
+      speakerId,
     );
 
     // Step 3: Text-to-Speech (ElevenLabs)
@@ -688,9 +727,6 @@ export class TranslationPipeline extends EventEmitter {
         validatedTranslation,
       );
     }
-
-    // Update rolling context for next chunk
-    this.previousTranscription = transcription;
 
     return {
       transcription,
@@ -816,7 +852,10 @@ export class TranslationPipeline extends EventEmitter {
   /**
    * Runs pipeline with Mizan for all stages (legacy mode).
    */
-  private async runPipelineWithMizan(chunk: AudioChunk): Promise<{
+  private async runPipelineWithMizan(
+    chunk: AudioChunk,
+    speakerId?: string,
+  ): Promise<{
     transcription: string;
     translation: string;
     audioBuffer: ArrayBuffer;
@@ -859,6 +898,9 @@ export class TranslationPipeline extends EventEmitter {
     });
 
     // Step 2: Translation
+    // Note: Legacy Mizan client uses template-based translation, so
+    // conversationContext cannot be injected here. Context-aware
+    // translation requires the ElevenLabs+Mizan provider mode.
     const translationStart = Date.now();
     const templateName = this.getTranslationTemplateName();
     const translationResult = await this.mizanClient.translate({
@@ -880,6 +922,9 @@ export class TranslationPipeline extends EventEmitter {
       chunkId: chunk.chunkId,
       translation: translation.substring(0, 50),
     });
+
+    // Update conversation context (even in legacy mode, for consistency)
+    this.conversationContext.addTurn(transcription, translation, speakerId);
 
     // Step 3: Text-to-Speech
     const ttsStart = Date.now();
@@ -908,9 +953,6 @@ export class TranslationPipeline extends EventEmitter {
         translation,
       );
     }
-
-    // Update rolling context for next chunk
-    this.previousTranscription = transcription;
 
     return {
       transcription,

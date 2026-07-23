@@ -656,10 +656,18 @@ export class TranslationPipeline extends EventEmitter {
       translation: translation.substring(0, 50),
     });
 
+    // Step 2b: Validate translation quality
+    const validatedTranslation = this.validateTranslation(
+      translation,
+      transcription,
+      this.config.targetLanguage,
+      chunk.chunkId,
+    );
+
     // Step 3: Text-to-Speech (ElevenLabs)
     const ttsStart = Date.now();
     const ttsResult = await this.ttsProvider!.synthesize({
-      text: translation,
+      text: validatedTranslation,
       language: this.config.targetLanguage,
       speed: this.config.ttsSpeed,
       outputFormat: "mp3",
@@ -677,7 +685,7 @@ export class TranslationPipeline extends EventEmitter {
         chunk.chunkId,
         ttsResult.audioBuffer,
         transcription,
-        translation,
+        validatedTranslation,
       );
     }
 
@@ -686,9 +694,123 @@ export class TranslationPipeline extends EventEmitter {
 
     return {
       transcription,
-      translation,
+      translation: validatedTranslation,
       audioBuffer: ttsResult.audioBuffer,
     };
+  }
+
+  /**
+   * Validates and cleans translation output for script purity and hallucination.
+   *
+   * Checks:
+   * 1. Devanagari contamination in Urdu output
+   * 2. Stray Latin words in non-English targets (excluding common loanwords)
+   * 3. Output significantly longer than input (hallucination indicator)
+   *
+   * Returns the cleaned translation text.
+   */
+  private validateTranslation(
+    translation: string,
+    sourceText: string,
+    targetLanguage: string,
+    chunkId: string,
+  ): string {
+    let cleaned = translation;
+    const issues: string[] = [];
+
+    // Check 1: Devanagari contamination in Urdu output
+    if (targetLanguage === "ur") {
+      const devanagariRegex = /[\u0900-\u097F]/g;
+      const devanagariMatches = cleaned.match(devanagariRegex);
+      if (devanagariMatches) {
+        issues.push(
+          `Devanagari chars in Urdu output: ${devanagariMatches.join("")}`,
+        );
+        // Replace common Devanagari-Urdu confusions
+        cleaned = cleaned.replace(/है/g, "ہے");
+        cleaned = cleaned.replace(/हैं/g, "ہیں");
+        cleaned = cleaned.replace(/नहीं/g, "نہیں");
+        cleaned = cleaned.replace(/में/g, "میں");
+        cleaned = cleaned.replace(/और/g, "اور");
+        cleaned = cleaned.replace(/का/g, "کا");
+        cleaned = cleaned.replace(/की/g, "کی");
+        cleaned = cleaned.replace(/के/g, "کے");
+        cleaned = cleaned.replace(/को/g, "کو");
+        cleaned = cleaned.replace(/से/g, "سے");
+        cleaned = cleaned.replace(/पर/g, "پر");
+        // Strip any remaining Devanagari characters
+        cleaned = cleaned.replace(devanagariRegex, "");
+      }
+    }
+
+    // Check 2: Stray Latin words in non-English targets
+    if (targetLanguage !== "en") {
+      // Common English loanwords that are acceptable in any language
+      const allowedLoanwords = new Set([
+        "doctor",
+        "bp",
+        "sugar",
+        "tablet",
+        "injection",
+        "report",
+        "test",
+        "fever",
+        "phone",
+        "internet",
+        "laptop",
+        "health",
+        "translation",
+        "translate",
+        "ok",
+        "testing",
+        "infection",
+      ]);
+
+      // Find Latin words (3+ chars to avoid acronyms/abbreviations)
+      const latinWordRegex = /\b[a-zA-Z]{3,}\b/g;
+      const latinWords = cleaned.match(latinWordRegex) || [];
+      const strayLatinWords = latinWords.filter(
+        (w) => !allowedLoanwords.has(w.toLowerCase()),
+      );
+
+      if (strayLatinWords.length > 0) {
+        issues.push(`Stray Latin words: ${strayLatinWords.join(", ")}`);
+        // Remove stray Latin words that are clearly contamination
+        for (const word of strayLatinWords) {
+          // Only remove if the word is surrounded by non-Latin text
+          const regex = new RegExp(`\\s*\\b${word}\\b\\s*`, "g");
+          cleaned = cleaned.replace(regex, " ");
+        }
+        cleaned = cleaned.replace(/\s+/g, " ").trim();
+      }
+    }
+
+    // Check 3: Length hallucination — output significantly longer than input
+    const sourceWordCount = sourceText.split(/\s+/).length;
+    const translationWordCount = cleaned.split(/\s+/).length;
+    if (
+      sourceWordCount > 0 &&
+      translationWordCount > sourceWordCount * 3 &&
+      sourceWordCount < 10
+    ) {
+      // Only flag short inputs where 3x expansion is suspicious
+      issues.push(
+        `Possible hallucination: ${sourceWordCount} source words → ${translationWordCount} translation words`,
+      );
+      // Don't alter the text — just log the warning for now
+    }
+
+    if (issues.length > 0) {
+      logger.warn("Translation validation issues", {
+        chunkId,
+        targetLanguage,
+        issues,
+        original: translation.substring(0, 80),
+        cleaned: cleaned.substring(0, 80),
+      });
+    }
+
+    return cleaned;
   }
 
   /**

@@ -152,6 +152,10 @@ export class ConferenceTracker extends EventEmitter {
     });
 
     this.emit("spawn-evaluation-needed", { roomName: room_name });
+
+    // Also evaluate termination — the previous language may now be orphaned
+    // (no participant speaks it), so stale agents should be cleaned up.
+    this.emit("termination-evaluation-needed", { roomName: room_name });
   }
 
   /**

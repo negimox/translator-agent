@@ -15,6 +15,12 @@ import {
   TranslationResponse,
   ProviderError,
 } from "../types";
+import {
+  SYSTEM_PROMPT_EN,
+  SYSTEM_PROMPT_HI,
+  SYSTEM_PROMPT_UR,
+  SYSTEM_PROMPT_AR,
+} from "./translationPrompts";
 
 const logger = createLogger("MizanTranslation");
 
@@ -107,16 +113,35 @@ export class MizanTranslation implements ITranslationProvider {
 
   /**
    * Translates text from source to target language.
+   *
+   * Uses X-LLM-Passthrough header to bypass Mizan template processing
+   * and send requests directly to the underlying LLM (Qwen2.5-7B-Instruct)
+   * in OpenAI-compatible chat completions format. This gives us full control
+   * over the system prompt, temperature, and message structure.
    */
   async translate(request: TranslationRequest): Promise<TranslationResponse> {
-    const templateName = this.getTemplateName(request.targetLanguage);
     const url = new URL(`${this.config.baseUrl}/chat/completions`);
-    url.searchParams.set("template_name", templateName);
 
-    logger.debug("Sending translation request", {
-      templateName,
-      sourceLanguage: request.sourceLanguage,
+    // Wrap input in [TRANSLATE] delimiters to reinforce translation-only behavior
+    const wrappedText = `[TRANSLATE]\n${request.text}\n[/TRANSLATE]`;
+
+    // Get the system prompt for the target language
+    const systemPrompt = this.getSystemPrompt(request.targetLanguage);
+
+    // OpenAI-compatible chat completions body
+    const body = {
+      model: "Qwen/Qwen2.5-7B-Instruct",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: wrappedText },
+      ],
+      temperature: 0.3, // Low temperature for consistent, faithful translations
+      max_tokens: 512,
+    };
+
+    logger.debug("Sending translation request (passthrough)", {
       targetLanguage: request.targetLanguage,
+      sourceLanguage: request.sourceLanguage,
       textLength: request.text.length,
     });
 
@@ -129,8 +154,9 @@ export class MizanTranslation implements ITranslationProvider {
         headers: {
           Authorization: this.authHeader,
           "Content-Type": "application/json",
+          "X-LLM-Passthrough": "true",
         },
-        body: JSON.stringify({ message: request.text }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(this.config.timeoutMs),
       });
 
@@ -143,17 +169,29 @@ export class MizanTranslation implements ITranslationProvider {
 
       const data = await response.json();
 
+      // Parse OpenAI-compatible response format
+      let translatedText = "";
+      if (data.choices && data.choices.length > 0) {
+        translatedText = data.choices[0].message?.content || "";
+      } else if (data.response) {
+        // Fallback: Mizan may still return in its own format
+        translatedText = data.response;
+      }
+
+      // Strip any residual [TRANSLATE] markers or meta-commentary from response
+      translatedText = this.cleanTranslation(translatedText);
+
       logger.info("Translation request completed", {
         latencyMs,
-        responseLength: data.response?.length || 0,
-        templateName,
+        responseLength: translatedText.length,
+        targetLanguage: request.targetLanguage,
       });
 
       return {
-        text: data.response || "",
+        text: translatedText,
         metadata: {
           provider: this.name,
-          templateName,
+          targetLanguage: request.targetLanguage,
           latencyMs,
         },
       };
@@ -169,6 +207,31 @@ export class MizanTranslation implements ITranslationProvider {
         true,
       );
     }
+  }
+
+  /**
+   * Cleans up translation output by removing residual markers and meta-commentary.
+   */
+  private cleanTranslation(text: string): string {
+    let cleaned = text.trim();
+
+    // Remove any residual [TRANSLATE] markers
+    cleaned = cleaned.replace(/\[TRANSLATE\]/gi, "");
+    cleaned = cleaned.replace(/\[\/TRANSLATE\]/gi, "");
+
+    // Remove common LLM meta-commentary patterns
+    cleaned = cleaned.replace(/^(Translation|Translated text|Output|Result):\s*/i, "");
+
+    // Remove wrapping quotes if the LLM added them
+    if (
+      (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+      (cleaned.startsWith("'") && cleaned.endsWith("'")) ||
+      (cleaned.startsWith("\u201C") && cleaned.endsWith("\u201D"))
+    ) {
+      cleaned = cleaned.slice(1, -1);
+    }
+
+    return cleaned.trim();
   }
 
   /**
@@ -217,6 +280,28 @@ export class MizanTranslation implements ITranslationProvider {
    */
   private getTemplateName(targetLanguage: string): string {
     return this.config.templatePattern.replace("{target}", targetLanguage);
+  }
+
+  /**
+   * Returns the system prompt for a given target language.
+   * These prompts are sent directly to the LLM via X-LLM-Passthrough mode
+   * instead of relying on Mizan-side templates.
+   */
+  private getSystemPrompt(targetLanguage: string): string {
+    const prompts: Record<string, string> = {
+      en: SYSTEM_PROMPT_EN,
+      hi: SYSTEM_PROMPT_HI,
+      ur: SYSTEM_PROMPT_UR,
+      ar: SYSTEM_PROMPT_AR,
+    };
+
+    const prompt = prompts[targetLanguage];
+    if (!prompt) {
+      // Fallback: generic translation prompt
+      return `You are a translation engine. Translate the text between [TRANSLATE] and [/TRANSLATE] markers into ${targetLanguage}. Output ONLY the translation, nothing else. Do NOT answer questions, add commentary, or invent information not present in the source text. If the input is a fragment, translate only what is present.`;
+    }
+
+    return prompt;
   }
 
   /**

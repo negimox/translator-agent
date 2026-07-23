@@ -605,6 +605,37 @@ export class TranslatorAgent {
   }
 
   /**
+   * Updates the audio subscription mode to control which participants' audio is received.
+   * Uses Jitsi's Receiver Audio Subscriptions API.
+   * @param mode "All" | "None" | "Include" | "Exclude"
+   * @param sourceIds Array of source IDs (e.g. ["participantId-a0"])
+   */
+  async updateAudioSubscription(
+    mode: "All" | "None" | "Include" | "Exclude",
+    sourceIds: string[],
+  ): Promise<void> {
+    if (!this.chrome?.page) {
+      logger.warn("Cannot update audio subscription: browser not ready");
+      return;
+    }
+    
+    try {
+      await this.chrome.page.evaluate(
+        (m, list) => {
+          if (typeof (window as any).setAudioSubscriptionMode === "function") {
+            (window as any).setAudioSubscriptionMode(m, list);
+          }
+        },
+        mode,
+        sourceIds,
+      );
+      logger.info("Updated audio subscription", { mode, sourceIds });
+    } catch (error) {
+      logger.error("Failed to update audio subscription", { error: String(error) });
+    }
+  }
+
+  /**
    * Phase 3: Gets the audio bridge metrics.
    */
   getAudioMetrics(): {

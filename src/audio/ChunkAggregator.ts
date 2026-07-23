@@ -222,21 +222,19 @@ export class ChunkAggregator extends EventEmitter {
     const hasSpeech = this.state.totalSamplesCollected > 0;
 
     // Conditions to emit:
-    // 1. Reached target duration AND have enough samples
-    // 2. Silence exceeded coalesce window
-    // 3. Reached maximum duration (force emit)
-
+    // 1. Dynamic silence threshold based on duration
     const reachedTarget = collectionDurationMs >= this.currentTargetDurationMs;
-    const silenceExceeded =
-      this.state.silenceDurationMs > this.config.vadSilenceCoalesceMs;
+    
+    // If we haven't reached target, require a long silence (end of sentence).
+    // If we have reached target, require a short silence (inter-word pause).
+    const requiredSilenceMs = reachedTarget ? 200 : this.config.vadSilenceCoalesceMs;
+    const silenceExceeded = this.state.silenceDurationMs > requiredSilenceMs;
+    
     const reachedMax = collectionDurationMs >= this.config.maxChunkDurationMs;
 
     const shouldEmit =
       hasSpeech &&
-      ((reachedTarget && silenceExceeded) || // Natural end of utterance
-        reachedMax || // Force emit at max
-        (silenceExceeded &&
-          collectionDurationMs >= this.config.minChunkDurationMs)); // End of speech
+      (silenceExceeded || reachedMax);
 
     if (shouldEmit) {
       this.emitChunk();

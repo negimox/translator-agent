@@ -17,6 +17,20 @@ let playbackQueue = [];
 let isPlaying = false;
 const MAX_PLAYBACK_QUEUE = 3;
 
+/**
+ * Updates the audio subscription mode for the current conference.
+ * @param {string} mode "All" | "None" | "Include" | "Exclude"
+ * @param {string[]} list Array of source IDs (e.g. ["endpoint1-a0", "endpoint2-a0"])
+ */
+window.setAudioSubscriptionMode = (mode, list = []) => {
+  if (room && typeof room.setAudioSubscriptionMode === "function") {
+    console.log("[Bot] Setting audio subscription:", { mode, list });
+    room.setAudioSubscriptionMode({ mode, list });
+  } else {
+    console.warn("[Bot] Cannot set audio subscription: room not ready or unsupported.");
+  }
+};
+
 // Configuration from URL parameters
 // Note: Named 'botConfig' to avoid conflict with Jitsi's global 'config' variable
 const urlParams = new URLSearchParams(window.location.search);

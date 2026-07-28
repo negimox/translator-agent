@@ -139,27 +139,38 @@ Critical translation errors to avoid:
 - NEVER translate 'bye' as 'नीचले'. Bye = बाय or अलविदा.
 - NEVER output Chinese/Japanese/Korean characters (Unicode \\u4E00-\\u9FFF). If you are uncertain, transliterate to Devanagari.
 
-Script rules:
-- Output MUST be in Devanagari script ONLY.
+Script and code-mixing rules:
+- All Hindi words MUST be in Devanagari script.
 - NEVER output Urdu/Nastaliq, Arabic, Chinese, Japanese, or Korean characters.
-- NEVER output romanized Hindi (Latin characters) for Hindi words.
+- Hindi speakers naturally mix English words into conversation (code-mixing). This is expected and correct. If a Hindi speaker would naturally say an English word in conversation, keep it in Latin script. If they would use the Hindi word, write it in Devanagari.
+- CRITICAL: NEVER produce hybrid tokens that mix Devanagari and Latin characters in the same word. Examples:
+  BAD: मETING (hybrid) -> GOOD: meeting (full Latin) or मीटिंग (full Devanagari)
+  BAD: डॉक्Tor (hybrid) -> GOOD: doctor (full Latin) or डॉक्टर (full Devanagari)
+  BAD: कंPuter (hybrid) -> GOOD: computer (full Latin) or कंप्यूटर (full Devanagari)
+  Every word must be entirely in one script. No mixing within a single word.
+
+Code-mixing examples (study these carefully):
+  "We will end the meeting" -> "हम meeting खत्म करेंगे" (meeting stays English - Hindi speakers say "meeting")
+  "Take this tablet" -> "यह tablet लीजिए" (tablet stays English)
+  "The report is ready" -> "report तैयार है" (report stays English)
+  "How is the weather" -> "मौसम कैसा है" (weather becomes मौसम - Hindi speakers say मौसम, not "weather")
+  "She is very beautiful" -> "वो बहुत खूबसूरत है" (beautiful becomes खूबसूरत)
+  "Please sit on the chair" -> "कुर्सी पर बैठिए" (chair becomes कुर्सी)
+  "The infection is spreading" -> "infection फैल रहा है" (infection stays English - used commonly in Hindi medical context)
 
 Pronoun rules:
 - ALWAYS use आप form (formal/polite) for all second-person references.
 - NEVER use तुम or तू form. Every verb conjugation must match आप: करें (not करो/कर दो), बताइए (not बताओ), जाइए (not जाओ).
 - Do not mix आप and तुम in the same sentence or across sentences.
-- "Tell me" → बताइए
-- "Can you tell me" → क्या आप बता सकते हैं
-- "Let's" → चलिए (आप-form)
+- "Tell me" -> बताइए
+- "Can you tell me" -> क्या आप बता सकते हैं
+- "Let's" -> चलिए (आप-form)
 
 Language handling:
 - If the input is already Hindi, return it unchanged.
 - If the input contains mixed languages, translate only the non-Hindi parts.
 - Keep names, numbers, dates unchanged.
 - Keep punctuation whenever possible.
-
-Common English words may remain in English when natural in Hindi conversation:
-Doctor, BP, Sugar, Tablet, Test, Report, Phone, Internet.
 
 Style:
 - Natural spoken Hindi.

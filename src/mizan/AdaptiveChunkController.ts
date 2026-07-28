@@ -53,14 +53,14 @@ export interface AdaptiveChunkConfig {
  * Default adaptive chunk configuration per Phase 4 spec.
  */
 export const DEFAULT_ADAPTIVE_CHUNK_CONFIG: AdaptiveChunkConfig = {
-  defaultChunkDurationMs: 900,
-  minChunkDurationMs: 500,
-  maxChunkDurationMs: 3000,
+  defaultChunkDurationMs: 3000,
+  minChunkDurationMs: 800,
+  maxChunkDurationMs: 5000,
   tokenLowThreshold: 0.4, // 40%
   queueHighThreshold: 6,
-  underLoadChunkDurationMs: 1400,
-  highLoadChunkDurationMs: 2000,
-  updateIntervalMs: 1000,
+  underLoadChunkDurationMs: 6000,
+  highLoadChunkDurationMs: 8000,
+  updateIntervalMs: 2000,
   smoothingFactor: 0.3,
 };
 
@@ -209,10 +209,12 @@ export class AdaptiveChunkController extends EventEmitter {
       this.lastAdjustmentTime = Date.now();
       this.adjustmentCount++;
 
-      // Update the aggregator
-      this.aggregator.setTargetDuration(clampedTarget);
+      // Update the aggregator's max duration (safety cap), not target
+      // Since VAD silence is the primary emit trigger, we only adjust
+      // how long continuous speech can buffer before force-emitting.
+      this.aggregator.setMaxDuration(clampedTarget);
 
-      logger.info("Chunk duration adjusted", {
+      logger.info("Max chunk duration adjusted", {
         previous: previousTarget,
         new: clampedTarget,
         loadLevel: state.loadLevel,
@@ -323,7 +325,7 @@ export class AdaptiveChunkController extends EventEmitter {
     this.smoothedTargetDurationMs = clamped;
 
     if (this.aggregator) {
-      this.aggregator.setTargetDuration(clamped);
+      this.aggregator.setMaxDuration(clamped);
     }
 
     logger.info("Target duration forced", { duration: clamped });
@@ -339,7 +341,7 @@ export class AdaptiveChunkController extends EventEmitter {
     this.adjustmentCount = 0;
 
     if (this.aggregator) {
-      this.aggregator.setTargetDuration(this.config.defaultChunkDurationMs);
+      this.aggregator.setMaxDuration(this.config.defaultChunkDurationMs);
     }
 
     logger.info("AdaptiveChunkController reset");

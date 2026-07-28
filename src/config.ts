@@ -134,15 +134,15 @@ export function loadConfig(): AgentConfig {
     // VAD settings (Phase 3)
     vadRmsThreshold: parseFloatEnv(process.env.VAD_RMS_THRESHOLD, 0.015), // ~-36dB
     vadSmoothingFrames: parseIntEnv(process.env.VAD_SMOOTHING_FRAMES, 3),
-    vadSilenceCoalesceMs: parseIntEnv(process.env.VAD_SILENCE_COALESCE_MS, 500),
+    vadSilenceCoalesceMs: parseIntEnv(process.env.VAD_SILENCE_COALESCE_MS, 600),
 
     // Chunk aggregation settings (Phase 3)
     targetChunkDurationMs: parseIntEnv(
       process.env.TARGET_CHUNK_DURATION_MS,
-      2000,
+      3000,
     ),
-    minChunkDurationMs: parseIntEnv(process.env.MIN_CHUNK_DURATION_MS, 1500),
-    maxChunkDurationMs: parseIntEnv(process.env.MAX_CHUNK_DURATION_MS, 3000),
+    minChunkDurationMs: parseIntEnv(process.env.MIN_CHUNK_DURATION_MS, 800),
+    maxChunkDurationMs: parseIntEnv(process.env.MAX_CHUNK_DURATION_MS, 5000),
     sampleRate: parseIntEnv(process.env.AUDIO_SAMPLE_RATE, 48000),
 
     // Debug settings (Phase 3)

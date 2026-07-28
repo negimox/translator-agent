@@ -33,9 +33,9 @@ export interface ChunkAggregatorConfig {
   vadSilenceCoalesceMs: number; // Max silence duration to coalesce (250ms)
 
   // Chunk timing
-  targetChunkDurationMs: number; // Default target: 900ms
-  minChunkDurationMs: number; // Minimum chunk to send: 300ms
-  maxChunkDurationMs: number; // Maximum chunk size: 3000ms
+  targetChunkDurationMs: number; // Soft ceiling for chunk size (3000ms default)
+  minChunkDurationMs: number; // Minimum chunk to send: 800ms
+  maxChunkDurationMs: number; // Safety cap for continuous speech: 5000ms
 
   // Adaptive chunking (mechanism built in Phase 3, logic in Phase 4)
   adaptiveChunkingEnabled: boolean;
@@ -51,10 +51,10 @@ export const DEFAULT_CHUNK_CONFIG: ChunkAggregatorConfig = {
   agentId: "translator-unknown",
   sampleRate: 48000,
   vadRmsThreshold: 0.015, // ~-36dB, slightly less sensitive to filter ambient noise
-  vadSilenceCoalesceMs: 500, // Coalesce utterances < 500ms apart (natural speech pauses are 300-500ms)
-  targetChunkDurationMs: 2000, // 2s target chunk for better STT context
-  minChunkDurationMs: 1500, // Don't send chunks < 1.5s (prevents filler-only micro-chunks)
-  maxChunkDurationMs: 3000, // Max 3 seconds
+  vadSilenceCoalesceMs: 600, // Coalesce utterances < 600ms apart (allows for thinking pauses)
+  targetChunkDurationMs: 3000, // 3s target — soft ceiling for chunk size
+  minChunkDurationMs: 800, // Allow natural short utterances ("yes", "okay thank you")
+  maxChunkDurationMs: 5000, // Max 5 seconds — safety cap for continuous speech
   adaptiveChunkingEnabled: false, // Disabled until Phase 4
   debugMode: false,
 };
@@ -221,22 +221,27 @@ export class ChunkAggregator extends EventEmitter {
     const collectionDurationMs = now - this.state.speechStartTime;
     const hasSpeech = this.state.totalSamplesCollected > 0;
 
-    // Conditions to emit:
-    // 1. Reached target duration AND have enough samples
-    // 2. Silence exceeded coalesce window
-    // 3. Reached maximum duration (force emit)
+    // Emit conditions (priority order):
+    // 1. PRIMARY: VAD silence exceeded coalesce window AND chunk meets minimum duration
+    //    → This is the natural speech boundary detector. Emits as soon as the speaker
+    //      pauses, preventing mid-word/mid-sentence splits.
+    // 2. SAFETY: Reached maximum duration (force emit for continuous speakers)
+    //    → Prevents unbounded buffering when someone talks without pausing.
+    //
+    // NOTE: targetChunkDurationMs is NOT used as a gate here. It exists only for
+    // the AdaptiveChunkController to signal rate-limit-aware preferences, but
+    // natural speech boundaries always take priority over timers.
 
-    const reachedTarget = collectionDurationMs >= this.currentTargetDurationMs;
     const silenceExceeded =
       this.state.silenceDurationMs > this.config.vadSilenceCoalesceMs;
+    const meetsMinDuration =
+      collectionDurationMs >= this.config.minChunkDurationMs;
     const reachedMax = collectionDurationMs >= this.config.maxChunkDurationMs;
 
     const shouldEmit =
       hasSpeech &&
-      ((reachedTarget && silenceExceeded) || // Natural end of utterance
-        reachedMax || // Force emit at max
-        (silenceExceeded &&
-          collectionDurationMs >= this.config.minChunkDurationMs)); // End of speech
+      ((silenceExceeded && meetsMinDuration) || // Natural speech boundary
+        reachedMax); // Safety cap for continuous speech
 
     if (shouldEmit) {
       this.emitChunk();
@@ -354,7 +359,9 @@ export class ChunkAggregator extends EventEmitter {
   }
 
   /**
-   * Updates the target chunk duration (for adaptive chunking in Phase 4).
+   * Updates the target chunk duration (soft ceiling, not a gate).
+   * This value is informational — checkAndEmitChunk does NOT gate on it.
+   * Kept for metrics/compatibility with AdaptiveChunkController.
    */
   setTargetDuration(durationMs: number): void {
     const clamped = Math.max(
@@ -369,6 +376,33 @@ export class ChunkAggregator extends EventEmitter {
       });
       this.currentTargetDurationMs = clamped;
     }
+  }
+
+  /**
+   * Updates the maximum chunk duration (safety cap for continuous speech).
+   * Called by the AdaptiveChunkController under load to allow longer chunks
+   * (fewer API calls) when the system is under pressure.
+   */
+  setMaxDuration(durationMs: number): void {
+    const clamped = Math.max(
+      this.config.minChunkDurationMs,
+      Math.min(10000, durationMs), // Hard upper limit of 10s
+    );
+
+    if (clamped !== this.config.maxChunkDurationMs) {
+      logger.info("Max duration updated", {
+        previous: this.config.maxChunkDurationMs,
+        new: clamped,
+      });
+      this.config.maxChunkDurationMs = clamped;
+    }
+  }
+
+  /**
+   * Gets current max duration.
+   */
+  getMaxDuration(): number {
+    return this.config.maxChunkDurationMs;
   }
 
   /**

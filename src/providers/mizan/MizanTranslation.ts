@@ -133,13 +133,16 @@ export class MizanTranslation implements ITranslationProvider {
 
     // OpenAI-compatible chat completions body
     const body = {
-      model: "Qwen/Qwen2.5-7B-Instruct",
+      model: "Imran1/QWEN2.5-32B-Translation",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: wrappedText },
       ],
-      temperature: 0.3, // Low temperature for consistent, faithful translations
-      max_tokens: 1024, // Increased from 768 to accommodate context in system prompt without truncating
+      temperature: 0.7,
+      top_p: 0.8,
+      top_k: 20,
+      repetition_penalty: 1.05,
+      max_tokens: 1024,
     };
 
     logger.debug("Sending translation request (passthrough)", {
@@ -223,7 +226,10 @@ export class MizanTranslation implements ITranslationProvider {
     cleaned = cleaned.replace(/\[\/TRANSLATE\]/gi, "");
 
     // Remove common LLM meta-commentary patterns
-    cleaned = cleaned.replace(/^(Translation|Translated text|Output|Result):\s*/i, "");
+    cleaned = cleaned.replace(
+      /^(Translation|Translated text|Output|Result):\s*/i,
+      "",
+    );
 
     // Remove wrapping quotes if the LLM added them
     if (

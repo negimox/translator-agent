@@ -180,10 +180,8 @@ export class MizanTranslation implements ITranslationProvider {
         { role: "system", content: systemPrompt },
         { role: "user", content: wrappedText },
       ],
-      temperature: 0.7,
-      top_p: 0.8,
-      top_k: 20,
-      repetition_penalty: 1.05,
+      temperature: 0.1,
+      top_p: 0.95,
       max_tokens: 1024,
     };
 

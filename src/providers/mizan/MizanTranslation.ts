@@ -20,6 +20,9 @@ import {
   SYSTEM_PROMPT_HI,
   SYSTEM_PROMPT_UR,
   SYSTEM_PROMPT_AR,
+  EXAMPLES_HI,
+  EXAMPLES_UR,
+  EXAMPLES_AR,
 } from "./translationPrompts";
 
 const logger = createLogger("MizanTranslation");
@@ -167,8 +170,8 @@ export class MizanTranslation implements ITranslationProvider {
     // Wrap input in [TRANSLATE] delimiters to reinforce translation-only behavior
     const wrappedText = `[TRANSLATE]\n${request.text}\n[/TRANSLATE]`;
 
-    // Get the system prompt for the target language (with optional context appended)
-    const systemPrompt = this.getSystemPrompt(
+    // Get the system prompt and few-shot examples for the target language
+    const promptData = this.getPromptData(
       request.targetLanguage,
       request.conversationContext,
     );
@@ -177,7 +180,8 @@ export class MizanTranslation implements ITranslationProvider {
     const body = {
       model: modelName,
       messages: [
-        { role: "system", content: systemPrompt },
+        { role: "system", content: promptData.systemPrompt },
+        ...(promptData.examples || []),
         { role: "user", content: wrappedText },
       ],
       temperature: 0.1,
@@ -334,22 +338,26 @@ export class MizanTranslation implements ITranslationProvider {
   }
 
   /**
-   * Returns the system prompt for a given target language.
-   * These prompts are sent directly to the LLM via X-LLM-Passthrough mode
-   * instead of relying on Mizan-side templates.
+   * Returns the system prompt and few-shot examples for a given target language.
    *
-   * If conversationContext is provided, it is appended to the prompt
+   * If conversationContext is provided, it is appended to the system prompt
    * before the "Text to translate:" marker (system-prompt-append pattern).
    */
-  private getSystemPrompt(
+  private getPromptData(
     targetLanguage: string,
     conversationContext?: string,
-  ): string {
+  ): { systemPrompt: string; examples?: Array<{ role: string; content: string }> } {
     const prompts: Record<string, string> = {
       en: SYSTEM_PROMPT_EN,
       hi: SYSTEM_PROMPT_HI,
       ur: SYSTEM_PROMPT_UR,
       ar: SYSTEM_PROMPT_AR,
+    };
+    
+    const examplesMap: Record<string, Array<{ role: string; content: string }>> = {
+      hi: EXAMPLES_HI,
+      ur: EXAMPLES_UR,
+      ar: EXAMPLES_AR,
     };
 
     let prompt = prompts[targetLanguage];
@@ -357,6 +365,8 @@ export class MizanTranslation implements ITranslationProvider {
       // Fallback: generic translation prompt
       prompt = `You are a translation engine. Translate the text between [TRANSLATE] and [/TRANSLATE] markers into ${targetLanguage}. Output ONLY the translation, nothing else. Do NOT answer questions, add commentary, or invent information not present in the source text. If the input is a fragment, translate only what is present.\n\nText to translate:`;
     }
+
+    const examples = examplesMap[targetLanguage];
 
     // Inject conversation context into the system prompt if available.
     // The context is inserted just before "Text to translate:" to keep
@@ -377,7 +387,7 @@ export class MizanTranslation implements ITranslationProvider {
       }
     }
 
-    return prompt;
+    return { systemPrompt: prompt, examples };
   }
 
   /**

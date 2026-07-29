@@ -76,23 +76,44 @@ Medical Terminology:
 - infection = infection
 - blood pressure = BP
 
-Few-Shot Examples:
-English: [TRANSLATE] How are you feeling today? [/TRANSLATE]
-Hindi: आपको आज कैसा लग रहा है?
-
-English: [TRANSLATE] I am testing the contents of the meeting. [/TRANSLATE]
-Hindi: मैं meeting के contents test कर रहा हूँ।
-
-English: [TRANSLATE] Is your stomach paining? [/TRANSLATE]
-Hindi: क्या आपके पेट में दर्द हो रहा है?
-
-English: [TRANSLATE] We need to check your BP and give you an injection. [/TRANSLATE]
-Hindi: हमें आपका BP check करना होगा और आपको injection देना होगा।
-
-English: [TRANSLATE] Now I am just doing some clicks of long sentences. [/TRANSLATE]
-Hindi: अब मैं बस लंबे वाक्यों के कुछ click कर रहा हूँ।
-
 Text to translate:`;
+
+export const EXAMPLES_HI = [
+  {
+    role: "user",
+    content: "[TRANSLATE] How are you feeling today? [/TRANSLATE]",
+  },
+  { role: "assistant", content: "आज आप कैसा महसूस कर रहे हैं?" },
+  {
+    role: "user",
+    content:
+      "[TRANSLATE] I am testing the contents of the meeting. [/TRANSLATE]",
+  },
+  { role: "assistant", content: "मैं meeting के contents test कर रहा हूँ।" },
+  {
+    role: "user",
+    content: "[TRANSLATE] Is your stomach paining? [/TRANSLATE]",
+  },
+  { role: "assistant", content: "क्या आपके पेट में दर्द हो रहा है?" },
+  {
+    role: "user",
+    content:
+      "[TRANSLATE] We need to check your BP and give you an injection. [/TRANSLATE]",
+  },
+  {
+    role: "assistant",
+    content: "हमें आपका BP check करना होगा और आपको injection देना होगा।",
+  },
+  {
+    role: "user",
+    content:
+      "[TRANSLATE] Now I am just doing some clicks of long sentences. [/TRANSLATE]",
+  },
+  {
+    role: "assistant",
+    content: "अब मैं बस लंबे वाक्यों के कुछ click कर रहा हूँ।",
+  },
+];
 
 /**
  * Urdu translation system prompt.
@@ -113,20 +134,30 @@ Medical Terminology:
 - stomach ache = پیٹ درد
 - medicine = دوا
 
-Few-Shot Examples:
-English: [TRANSLATE] How are you feeling today? [/TRANSLATE]
-Urdu: آپ کو آج کیسا لگ رہا ہے؟
-
-English: [TRANSLATE] Is your stomach paining? [/TRANSLATE]
-Urdu: کیا آپ کے پیٹ میں درد ہو رہا ہے؟
-
-English: [TRANSLATE] The infection is spreading quickly. [/TRANSLATE]
-Urdu: Infection تیزی سے پھیل رہا ہے۔
-
-English: [TRANSLATE] We will end the meeting now. [/TRANSLATE]
-Urdu: ہم اب meeting ختم کریں گے۔
-
 Text to translate:`;
+
+export const EXAMPLES_UR = [
+  {
+    role: "user",
+    content: "[TRANSLATE] How are you feeling today? [/TRANSLATE]",
+  },
+  { role: "assistant", content: "آپ کو آج کیسا لگ رہا ہے؟" },
+  {
+    role: "user",
+    content: "[TRANSLATE] Is your stomach paining? [/TRANSLATE]",
+  },
+  { role: "assistant", content: "کیا آپ کے پیٹ میں درد ہو رہا ہے؟" },
+  {
+    role: "user",
+    content: "[TRANSLATE] The infection is spreading quickly. [/TRANSLATE]",
+  },
+  { role: "assistant", content: "Infection تیزی سے پھیل رہا ہے۔" },
+  {
+    role: "user",
+    content: "[TRANSLATE] We will end the meeting now. [/TRANSLATE]",
+  },
+  { role: "assistant", content: "ہم اب meeting ختم کریں گے۔" },
+];
 
 /**
  * Arabic translation system prompt.
@@ -147,17 +178,27 @@ Medical Terminology:
 - stomach ache = وجع بطن
 - medicine = دواء
 
-Few-Shot Examples:
-English: [TRANSLATE] How are you feeling today? [/TRANSLATE]
-Arabic: كيف حاسس حالك اليوم؟
-
-English: [TRANSLATE] Is your stomach paining? [/TRANSLATE]
-Arabic: هل بطنك بوجعك؟
-
-English: [TRANSLATE] The infection is severe. [/TRANSLATE]
-Arabic: الالتهاب شديد.
-
-English: [TRANSLATE] Let's check your blood pressure. [/TRANSLATE]
-Arabic: خلينا نفحص الـ BP تبعك.
-
 Text to translate:`;
+
+export const EXAMPLES_AR = [
+  {
+    role: "user",
+    content: "[TRANSLATE] How are you feeling today? [/TRANSLATE]",
+  },
+  { role: "assistant", content: "كيف حاسس حالك اليوم؟" },
+  {
+    role: "user",
+    content: "[TRANSLATE] Is your stomach paining? [/TRANSLATE]",
+  },
+  { role: "assistant", content: "هل بطنك بوجعك؟" },
+  {
+    role: "user",
+    content: "[TRANSLATE] The infection is severe. [/TRANSLATE]",
+  },
+  { role: "assistant", content: "الالتهاب شديد." },
+  {
+    role: "user",
+    content: "[TRANSLATE] Let's check your blood pressure. [/TRANSLATE]",
+  },
+  { role: "assistant", content: "خلينا نفحص الـ BP تبعك." },
+];

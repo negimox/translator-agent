@@ -34,6 +34,10 @@ export interface MizanTranslationConfig {
   timeoutMs: number;
   /** Template pattern - use {target} placeholder */
   templatePattern: string;
+  /** Model name for X-LLM-Passthrough requests */
+  modelName: string;
+  /** Fallback model name if primary returns 404 */
+  fallbackModelName?: string;
 }
 
 /**
@@ -46,6 +50,7 @@ export const DEFAULT_MIZAN_TRANSLATION_CONFIG: Omit<
   baseUrl: "https://platform.mizanlabs.com/api/v1",
   timeoutMs: 30000,
   templatePattern: "translator_{target}",
+  modelName: "Qwen/Qwen2.5-7B-Instruct",
 };
 
 /**
@@ -107,7 +112,8 @@ export class MizanTranslation implements ITranslationProvider {
 
     logger.info("MizanTranslation initialized", {
       baseUrl: this.config.baseUrl,
-      templatePattern: this.config.templatePattern,
+      modelName: this.config.modelName,
+      fallbackModelName: this.config.fallbackModelName || "none",
     });
   }
 
@@ -118,8 +124,44 @@ export class MizanTranslation implements ITranslationProvider {
    * and send requests directly to the underlying LLM (Qwen2.5-7B-Instruct)
    * in OpenAI-compatible chat completions format. This gives us full control
    * over the system prompt, temperature, and message structure.
+   *
+   * If the primary model returns 404, retries once with the fallback model.
    */
   async translate(request: TranslationRequest): Promise<TranslationResponse> {
+    try {
+      return await this.executeTranslation(request, this.config.modelName);
+    } catch (error) {
+      if (
+        error instanceof ProviderError &&
+        error.statusCode === 404 &&
+        this.config.fallbackModelName &&
+        this.config.fallbackModelName !== this.config.modelName
+      ) {
+        logger.warn(
+          "Primary model returned 404, retrying with fallback model",
+          {
+            primaryModel: this.config.modelName,
+            fallbackModel: this.config.fallbackModelName,
+            targetLanguage: request.targetLanguage,
+          },
+        );
+        return await this.executeTranslation(
+          request,
+          this.config.fallbackModelName,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Executes a single translation request against the Mizan passthrough API
+   * with the given model name.
+   */
+  private async executeTranslation(
+    request: TranslationRequest,
+    modelName: string,
+  ): Promise<TranslationResponse> {
     const url = new URL(`${this.config.baseUrl}/chat/completions`);
 
     // Wrap input in [TRANSLATE] delimiters to reinforce translation-only behavior
@@ -133,7 +175,7 @@ export class MizanTranslation implements ITranslationProvider {
 
     // OpenAI-compatible chat completions body
     const body = {
-      model: "Imran1/QWEN2.5-32B-Translation",
+      model: modelName,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: wrappedText },
@@ -149,6 +191,7 @@ export class MizanTranslation implements ITranslationProvider {
       targetLanguage: request.targetLanguage,
       sourceLanguage: request.sourceLanguage,
       textLength: request.text.length,
+      model: modelName,
     });
 
     const startTime = Date.now();
@@ -170,7 +213,7 @@ export class MizanTranslation implements ITranslationProvider {
 
       if (!response.ok) {
         this.errorCount++;
-        throw await this.createError(response);
+        throw await this.createError(response, modelName);
       }
 
       const data = await response.json();
@@ -191,6 +234,7 @@ export class MizanTranslation implements ITranslationProvider {
         latencyMs,
         responseLength: translatedText.length,
         targetLanguage: request.targetLanguage,
+        model: modelName,
       });
 
       return {
@@ -341,7 +385,7 @@ export class MizanTranslation implements ITranslationProvider {
   /**
    * Creates a ProviderError from a fetch response.
    */
-  private async createError(response: Response): Promise<ProviderError> {
+  private async createError(response: Response, modelName?: string): Promise<ProviderError> {
     const retryAfter = response.headers.get("retry-after");
     const retryAfterMs = retryAfter
       ? parseInt(retryAfter, 10) * 1000
@@ -350,15 +394,26 @@ export class MizanTranslation implements ITranslationProvider {
     const retryable = response.status === 429 || response.status >= 500;
 
     let message = `Mizan Translation error: ${response.status} ${response.statusText}`;
+    let errorBody = "";
 
     try {
       const errorData = await response.json();
+      errorBody = JSON.stringify(errorData);
       if (errorData.error) {
         message = `Mizan Translation error: ${errorData.error}`;
       }
     } catch {
       // Body is not JSON
     }
+
+    // Log detailed error info for debugging
+    logger.error("Mizan API error", {
+      status: response.status,
+      statusText: response.statusText,
+      model: modelName,
+      errorBody: errorBody.substring(0, 200),
+      url: response.url,
+    });
 
     return new ProviderError(
       message,

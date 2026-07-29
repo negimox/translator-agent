@@ -825,46 +825,9 @@ export class TranslationPipeline extends EventEmitter {
     }
 
     // Check 2: Stray Latin words in non-English targets
-    if (targetLanguage !== "en") {
-      // Common English loanwords that are acceptable in any language
-      const allowedLoanwords = new Set([
-        "doctor",
-        "bp",
-        "sugar",
-        "tablet",
-        "injection",
-        "report",
-        "test",
-        "fever",
-        "phone",
-        "internet",
-        "laptop",
-        "health",
-        "translation",
-        "translate",
-        "ok",
-        "testing",
-        "infection",
-      ]);
-
-      // Find Latin words (3+ chars to avoid acronyms/abbreviations)
-      const latinWordRegex = /\b[a-zA-Z]{3,}\b/g;
-      const latinWords = cleaned.match(latinWordRegex) || [];
-      const strayLatinWords = latinWords.filter(
-        (w) => !allowedLoanwords.has(w.toLowerCase()),
-      );
-
-      if (strayLatinWords.length > 0) {
-        issues.push(`Stray Latin words: ${strayLatinWords.join(", ")}`);
-        // Remove stray Latin words that are clearly contamination
-        for (const word of strayLatinWords) {
-          // Only remove if the word is surrounded by non-Latin text
-          const regex = new RegExp(`\\s*\\b${word}\\b\\s*`, "g");
-          cleaned = cleaned.replace(regex, " ");
-        }
-        cleaned = cleaned.replace(/\s+/g, " ").trim();
-      }
-    }
+    // DEPRECATED: We now rely on Few-Shot prompting to keep the LLM on script. 
+    // Stripping Latin words destroys valid medical loanwords (like 'paracetamol') 
+    // that the LLM correctly identified and kept in English.
 
     // Check 3: Length hallucination — output significantly longer than input
     const sourceWordCount = sourceText.split(/\s+/).length;

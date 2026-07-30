@@ -267,21 +267,27 @@ export class MizanTranslation implements ITranslationProvider {
   private cleanTranslation(text: string): string {
     let cleaned = text.trim();
 
-    // Remove any residual [TRANSLATE] markers
-    cleaned = cleaned.replace(/\[TRANSLATE\]/gi, "");
-    cleaned = cleaned.replace(/\[\/TRANSLATE\]/gi, "");
+    // Extract content from <translate>...</translate> if present
+    const translateMatch = cleaned.match(/<translate>([\s\S]*?)<\/translate>/i);
+    if (translateMatch) {
+      cleaned = translateMatch[1].trim();
+    } else {
+      // Remove any residual [TRANSLATE] markers
+      cleaned = cleaned.replace(/\[TRANSLATE\]/gi, "");
+      cleaned = cleaned.replace(/\[\/TRANSLATE\]/gi, "");
 
-    // Remove common LLM meta-commentary patterns
-    cleaned = cleaned.replace(
-      /^(Translation|Translated text|Output|Result):\s*/i,
-      "",
-    );
+      // Remove common LLM meta-commentary patterns
+      cleaned = cleaned.replace(
+        /^(Translation|Translated text|Output|Result):\s*/i,
+        "",
+      );
 
-    // Remove language labels that the few-shot format can teach the model to emit
-    cleaned = cleaned.replace(
-      /^(Hindi|Arabic|Urdu|English|अनुवाद|الترجمة|ترجمہ):\s*/i,
-      "",
-    );
+      // Remove language labels that the few-shot format can teach the model to emit
+      cleaned = cleaned.replace(
+        /^(Hindi|Arabic|Urdu|English|अनुवाद|الترجمة|ترجمہ):\s*/i,
+        "",
+      );
+    }
 
     // Remove wrapping quotes if the LLM added them
     if (

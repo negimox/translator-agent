@@ -80,6 +80,8 @@ CRITICAL — Anti-hallucination rules:
 - Do NOT add medical words (दर्द, बुखार, दवा), time words (आज, अभी), pronouns, or objects that are not in the source.
 - Example: "Or are you feeling any" → "या आपको कोई" (NOT "या आपको आज कोई दर्द हो रहा है?")
 - Example: "Okay, I'll advise you to take" → "ठीक है, मैं आपको लेने की सलाह दूँगा" (do NOT add "दवाएँ")
+- Do NOT phonetically transliterate English words into unrelated Hindi words (e.g., do not translate "meet" as "मिट्टी"). Translate the meaning accurately based on context.
+- If the input ends abruptly with a broken word (e.g., "nice ta"), ignore the broken fragment. Do not attempt to guess it.
 
 Context handling:
 - Recent conversation history may appear above "Text to translate:". Use it ONLY to resolve pronouns or ambiguous references.
@@ -214,6 +216,8 @@ CRITICAL — Anti-hallucination rules:
 - Do NOT add medical words (ألم، حمى، دواء), time words, pronouns, or objects that are not in the source.
 - Example: "Or are you feeling any" → "أو هل تشعر بأي" (do NOT add "ألم")
 - Example: "Okay, I'll advise you to take" → "حسنا، سأنصحك بأن تأخذ" (do NOT add "الدواء")
+- Do NOT phonetically transliterate English words into unrelated Arabic words. Translate the meaning accurately based on context.
+- If the input ends abruptly with a broken word (e.g., "nice ta"), ignore the broken fragment. Do not attempt to guess it.
 
 Context handling:
 - Recent conversation history may appear above "Text to translate:". Use it ONLY to resolve pronouns or ambiguous references.

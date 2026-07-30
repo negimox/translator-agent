@@ -225,23 +225,22 @@ export class ChunkAggregator extends EventEmitter {
     // 1. PRIMARY: VAD silence exceeded coalesce window AND chunk meets minimum duration
     //    → This is the natural speech boundary detector. Emits as soon as the speaker
     //      pauses, preventing mid-word/mid-sentence splits.
-    // 2. SAFETY: Reached maximum duration (force emit for continuous speakers)
-    //    → Prevents unbounded buffering when someone talks without pausing.
+    // 2. SAFETY: Absolute hard cap of 15 seconds (force emit for continuous speakers)
+    //    → Prevents unbounded buffering and memory bloat when someone talks without pausing.
     //
-    // NOTE: targetChunkDurationMs is NOT used as a gate here. It exists only for
-    // the AdaptiveChunkController to signal rate-limit-aware preferences, but
-    // natural speech boundaries always take priority over timers.
+    // NOTE: targetChunkDurationMs and maxChunkDurationMs are treated as soft targets,
+    // they guide rate limiting but we still wait for a natural speech boundary.
 
     const silenceExceeded =
       this.state.silenceDurationMs > this.config.vadSilenceCoalesceMs;
     const meetsMinDuration =
       collectionDurationMs >= this.config.minChunkDurationMs;
-    const reachedMax = collectionDurationMs >= this.config.maxChunkDurationMs;
+    const reachedHardMax = collectionDurationMs >= 15000; // 15 seconds absolute safety cap
 
     const shouldEmit =
       hasSpeech &&
       ((silenceExceeded && meetsMinDuration) || // Natural speech boundary
-        reachedMax); // Safety cap for continuous speech
+        reachedHardMax); // Absolute safety cap for continuous speech
 
     if (shouldEmit) {
       this.emitChunk();

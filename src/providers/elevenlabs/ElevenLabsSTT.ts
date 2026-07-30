@@ -20,46 +20,7 @@ import {
 
 const logger = createLogger("ElevenLabsSTT");
 
-/**
- * Medical keyterms for STT bias.
- *
- * ElevenLabs Scribe v2 supports keyterm prompting (up to 100 terms, ≤50 chars each)
- * to bias the model toward domain-specific vocabulary. Without these, Scribe
- * frequently misrecognizes drug names (e.g., "Paracetamol" → "Parasite").
- */
-const MEDICAL_KEYTERMS: string[] = [
-  // Common medications
-  "Paracetamol",
-  "Ibuprofen",
-  "Amoxicillin",
-  "Aspirin",
-  "Metformin",
-  "Insulin",
-  "Omeprazole",
-  "Cetirizine",
-  "Azithromycin",
-  "Ciprofloxacin",
-  // Indian brand names
-  "Dolo",
-  "Crocin",
-  "Disprin",
-  "Combiflam",
-  "Augmentin",
-  "Xylin",
-  // Medical terms commonly misrecognized
-  "blood pressure",
-  "diabetes",
-  "injection",
-  "antibiotic",
-  "prescription",
-  "diagnosis",
-  "stethoscope",
-  "thermometer",
-  "oxygen",
-  "ventilator",
-  "nebulizer",
-  "inhaler",
-];
+
 
 /**
  * ElevenLabs STT response structure.
@@ -136,11 +97,7 @@ export class ElevenLabsSTT implements ISTTProvider {
     // and suppressing at source avoids wasting pipeline cycles
     formData.append("tag_audio_events", "false");
 
-    // Keyterm prompting — bias model toward medical/pharmaceutical vocabulary
-    // Each term is appended as a separate form field per ElevenLabs API spec
-    for (const term of MEDICAL_KEYTERMS) {
-      formData.append("keyterms", term);
-    }
+
 
     logger.debug("Sending STT request", {
       url,

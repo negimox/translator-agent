@@ -162,11 +162,16 @@ export class ConversationContext {
    * - No turns are available (first chunk)
    * - All turns are stale (long pause in conversation)
    *
+   * IMPORTANT: Only includes source-side transcriptions (not prior model
+   * translations) to prevent error propagation. If a previous translation
+   * was wrong (e.g., "weather" → "जल्दी"), including that translation in
+   * context would cause the model to copy the error verbatim.
+   *
    * Format:
    * ```
    * Recent conversation for reference (use ONLY for resolving pronouns and ambiguity, do NOT translate this):
-   * [Speaker-A] "How long have you had this headache?" → "تو یہ سر درد آپکو کب سے ہے؟"
-   * [Speaker-B] "It started about 3 days ago" → "یہ تقریباً 3 دن پہلے شروع ہوا"
+   * [Speaker-A] "How long have you had this headache?"
+   * [Speaker-B] "It started about 3 days ago"
    * ```
    */
   getContextBlock(): string {
@@ -179,7 +184,7 @@ export class ConversationContext {
 
     const lines = this.turns.map(
       (turn) =>
-        `[Speaker-${turn.speakerLabel}] "${turn.transcription}" → "${turn.translation}"`,
+        `[Speaker-${turn.speakerLabel}] "${turn.transcription}"`,
     );
 
     return [

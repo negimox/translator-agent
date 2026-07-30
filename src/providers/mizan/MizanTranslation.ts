@@ -277,6 +277,12 @@ export class MizanTranslation implements ITranslationProvider {
       "",
     );
 
+    // Remove language labels that the few-shot format can teach the model to emit
+    cleaned = cleaned.replace(
+      /^(Hindi|Arabic|Urdu|English|अनुवाद|الترجمة|ترجمہ):\s*/i,
+      "",
+    );
+
     // Remove wrapping quotes if the LLM added them
     if (
       (cleaned.startsWith('"') && cleaned.endsWith('"')) ||

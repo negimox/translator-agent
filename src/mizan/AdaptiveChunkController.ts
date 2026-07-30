@@ -196,10 +196,11 @@ export class AdaptiveChunkController extends EventEmitter {
     // Round to nearest 100ms
     const newTarget = Math.round(this.smoothedTargetDurationMs / 100) * 100;
 
-    // Clamp to valid range
+    // Clamp to valid range (do not cap at maxChunkDurationMs for the soft target, 
+    // we want it to expand under load to buffer longer chunks)
     const clampedTarget = Math.max(
       this.config.minChunkDurationMs,
-      Math.min(this.config.maxChunkDurationMs, newTarget),
+      newTarget,
     );
 
     // Check if we need to adjust
@@ -209,12 +210,12 @@ export class AdaptiveChunkController extends EventEmitter {
       this.lastAdjustmentTime = Date.now();
       this.adjustmentCount++;
 
-      // Update the aggregator's max duration (safety cap), not target
-      // Since VAD silence is the primary emit trigger, we only adjust
-      // how long continuous speech can buffer before force-emitting.
-      this.aggregator.setMaxDuration(clampedTarget);
+      // Update the aggregator's target duration (soft ceiling), not max duration.
+      // The max duration should remain a hard safety cap for continuous speech,
+      // while target duration guides when to emit during natural pauses.
+      this.aggregator.setTargetDuration(clampedTarget);
 
-      logger.info("Max chunk duration adjusted", {
+      logger.info("Target chunk duration adjusted", {
         previous: previousTarget,
         new: clampedTarget,
         loadLevel: state.loadLevel,

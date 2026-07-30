@@ -366,7 +366,7 @@ export class ChunkAggregator extends EventEmitter {
   setTargetDuration(durationMs: number): void {
     const clamped = Math.max(
       this.config.minChunkDurationMs,
-      Math.min(this.config.maxChunkDurationMs, durationMs),
+      Math.min(10000, durationMs), // Hard upper limit of 10s
     );
 
     if (clamped !== this.currentTargetDurationMs) {
@@ -375,6 +375,13 @@ export class ChunkAggregator extends EventEmitter {
         new: clamped,
       });
       this.currentTargetDurationMs = clamped;
+      
+      // If target is pushed higher than our safety cap (maxChunkDurationMs),
+      // we must push the safety cap up too, otherwise the cap will force-cut
+      // speech mid-word before we even reach the target.
+      if (clamped > this.config.maxChunkDurationMs) {
+        this.setMaxDuration(clamped + 2000); // Give 2s of breathing room above target
+      }
     }
   }
 

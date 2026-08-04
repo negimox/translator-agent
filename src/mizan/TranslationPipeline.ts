@@ -44,6 +44,7 @@ import {
   ConversationContext,
   ConversationContextConfig,
 } from "./ConversationContext";
+import { TextSegmenter } from "./TextSegmenter";
 import {
   ISTTProvider,
   ITranslationProvider,
@@ -206,6 +207,10 @@ export class TranslationPipeline extends EventEmitter {
 
   // Conversation context for translation continuity across chunks
   private conversationContext: ConversationContext;
+  private textSegmenter: TextSegmenter;
+
+  // Deduplication state for audio overlapping
+  private speakerCommittedUntil: Map<string, number> = new Map();
 
   // Metrics
   private totalChunksReceived: number = 0;
@@ -259,11 +264,12 @@ export class TranslationPipeline extends EventEmitter {
       maxInFlight: this.config.maxInFlight,
     });
 
-    // Initialize conversation context
+    // Initialize conversation context and segmenter
     this.conversationContext = new ConversationContext({
       windowSize: this.config.contextWindowSize,
       stalenessMs: this.config.contextStalenessMs,
     });
+    this.textSegmenter = new TextSegmenter();
 
     // Set up event handlers
     this.setupEventHandlers();
@@ -362,8 +368,9 @@ export class TranslationPipeline extends EventEmitter {
     // Clear remaining queue
     this.queue.clear();
 
-    // Reset conversation context
+    // Reset conversation context and segmenter
     this.conversationContext.reset();
+    this.textSegmenter.clearAll();
 
     logger.info("TranslationPipeline stopped", {
       processed: this.totalChunksProcessed,
@@ -639,6 +646,58 @@ export class TranslationPipeline extends EventEmitter {
       throw new Error("Empty transcription result");
     }
 
+    // Step 1.5: Audio Overlap Deduplication
+    let finalTranscription = transcription;
+    const speakerKey = speakerId || "unknown_speaker";
+    const words = sttResult.metadata?.words as Array<{ text: string; start: number; end: number }> | undefined;
+    
+    if (words && words.length > 0) {
+      const committedUntil = this.speakerCommittedUntil.get(speakerKey) || 0;
+      let validWords = [];
+      let maxWordEnd = 0;
+
+      for (const word of words) {
+        // Calculate absolute time of the word's midpoint
+        const wordMidpointSec = word.start + (word.end - word.start) / 2;
+        const absoluteMidpointMs = chunk.audioStartTime + (wordMidpointSec * 1000);
+
+        if (absoluteMidpointMs > committedUntil) {
+          validWords.push(word.text);
+        }
+        
+        const absoluteEndMs = chunk.audioStartTime + (word.end * 1000);
+        if (absoluteEndMs > maxWordEnd) {
+          maxWordEnd = absoluteEndMs;
+        }
+      }
+
+      if (validWords.length === 0) {
+        logger.debug("All words deduplicated (already processed in previous chunk)", {
+          chunkId: chunk.chunkId,
+          speakerId: speakerKey
+        });
+        throw new Error("Empty transcription result");
+      }
+
+      finalTranscription = validWords.join("");
+      
+      // We don't commit the *very end* of the chunk, because the last word might have been cut off.
+      // Wait, with overlapping chunks, the next chunk will contain the last 1.5s of THIS chunk.
+      // So we should only commit up to `chunk.audioStartTime + chunk.durationMs - overlapMs`.
+      // Actually, we can commit up to maxWordEnd - 1000ms (to allow the last second to be re-evaluated).
+      const overlapBufferMs = 1500; // Match chunkOverlapMs
+      const absoluteChunkEndMs = chunk.audioStartTime + chunk.durationMs;
+      const newCommittedUntil = absoluteChunkEndMs - overlapBufferMs;
+      
+      this.speakerCommittedUntil.set(speakerKey, Math.max(committedUntil, newCommittedUntil));
+
+      logger.debug("STT Deduplication applied", {
+        original: transcription,
+        deduped: finalTranscription,
+        committedUntil: newCommittedUntil
+      });
+    }
+
     // Skip if detected language matches target — no translation needed.
     // e.g. if this is the "en" agent and the speaker is already speaking English.
     const detectedLang = sttResult.detectedLanguage;
@@ -661,14 +720,29 @@ export class TranslationPipeline extends EventEmitter {
       detectedLanguage: sttResult.detectedLanguage,
     });
 
+    // Step 1.6: Text-Level Sentence Buffering
+    // Wait for complete sentences before translating
+    const sentences = this.textSegmenter.process(finalTranscription, speakerKey);
+    if (sentences.length === 0) {
+      logger.debug("Buffering incomplete fragment", {
+        chunkId: chunk.chunkId,
+        speakerId: speakerKey,
+        fragment: finalTranscription
+      });
+      throw new Error("Empty transcription result");
+    }
+    
+    // Use the complete sentences for translation
+    finalTranscription = sentences.join(" ");
+
     // Step 2: Translation (Mizan) — with conversation context
-    const contextBlock = this.conversationContext.getContextBlock();
+    const contextTurns = this.conversationContext.getContextTurns();
     const translationStart = Date.now();
     const translationResult = await this.translationProvider!.translate({
-      text: transcription,
+      text: finalTranscription,
       sourceLanguage: this.config.sourceLanguage,
       targetLanguage: this.config.targetLanguage,
-      conversationContext: contextBlock || undefined,
+      conversationContext: contextTurns.length > 0 ? contextTurns : undefined,
     });
     this.totalTranslationLatencyMs += Date.now() - translationStart;
 
@@ -681,10 +755,10 @@ export class TranslationPipeline extends EventEmitter {
         originalTranslation: translation.substring(0, 50),
       });
       const retryResult = await this.translationProvider!.translate({
-        text: transcription,
+        text: finalTranscription,
         sourceLanguage: this.config.sourceLanguage,
         targetLanguage: this.config.targetLanguage,
-        conversationContext: contextBlock || undefined,
+        conversationContext: contextTurns.length > 0 ? contextTurns : undefined,
       });
       if (retryResult.text && !cjkRegex.test(retryResult.text)) {
         translation = retryResult.text;
@@ -714,13 +788,13 @@ export class TranslationPipeline extends EventEmitter {
     logger.debug("Translation completed (Mizan)", {
       chunkId: chunk.chunkId,
       translation: translation.substring(0, 50),
-      contextUsed: !!contextBlock,
+      contextUsed: contextTurns.length > 0,
     });
 
     // Step 2c: Validate translation quality
     const validatedTranslation = this.validateTranslation(
       translation,
-      transcription,
+      finalTranscription,
       this.config.targetLanguage,
       chunk.chunkId,
     );
@@ -728,7 +802,7 @@ export class TranslationPipeline extends EventEmitter {
     // Update conversation context with this turn (before TTS so context
     // is available even if TTS fails)
     this.conversationContext.addTurn(
-      transcription,
+      finalTranscription,
       validatedTranslation,
       speakerId,
     );
@@ -753,13 +827,13 @@ export class TranslationPipeline extends EventEmitter {
       this.saveTTSDebugFile(
         chunk.chunkId,
         ttsResult.audioBuffer,
-        transcription,
+        finalTranscription,
         validatedTranslation,
       );
     }
 
     return {
-      transcription,
+      transcription: finalTranscription,
       translation: validatedTranslation,
       audioBuffer: ttsResult.audioBuffer,
     };

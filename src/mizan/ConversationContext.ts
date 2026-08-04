@@ -31,8 +31,6 @@ export interface DialogueTurn {
   speakerLabel: string;
   /** Timestamp when this turn was added */
   timestamp: number;
-  /** Whether this turn is a dangling fragment (ends mid-sentence) */
-  isFragment: boolean;
 }
 
 /**
@@ -67,8 +65,6 @@ export class ConversationContext {
   private turns: DialogueTurn[] = [];
   private speakerMap: Map<string, string> = new Map();
   private speakerCounter = 0;
-  /** Pending fragment waiting to be merged with the next complete turn */
-  private pendingFragment: DialogueTurn | null = null;
 
   constructor(config: Partial<ConversationContextConfig> = {}) {
     this.config = { ...DEFAULT_CONTEXT_CONFIG, ...config };
@@ -102,43 +98,13 @@ export class ConversationContext {
     );
 
     const speakerLabel = this.getSpeakerLabel(speakerId);
-    const isFragment = this.detectFragment(truncatedTranscription);
-
-    // Check if this turn subsumes a pending fragment (fragment merging)
-    // e.g. fragment="How is the" → new turn="How is the weather there?"
-    // The new turn already contains the complete sentence, so discard the fragment.
-    if (this.pendingFragment) {
-      const fragmentText = this.pendingFragment.transcription.trim().toLowerCase();
-      const newText = truncatedTranscription.trim().toLowerCase();
-      if (newText.startsWith(fragmentText) || newText.includes(fragmentText)) {
-        logger.debug("Fragment merged into new turn", {
-          fragment: this.pendingFragment.transcription,
-          newTurn: truncatedTranscription.substring(0, 50),
-        });
-      } else {
-        logger.debug("Fragment discarded (not subsumed by new turn)", {
-          fragment: this.pendingFragment.transcription,
-        });
-      }
-      this.pendingFragment = null;
-    }
 
     const turn: DialogueTurn = {
       transcription: truncatedTranscription,
       translation: truncatedTranslation,
       speakerLabel,
       timestamp: Date.now(),
-      isFragment,
     };
-
-    // If this turn is a fragment, store it as pending but don't add to context
-    if (isFragment) {
-      this.pendingFragment = turn;
-      logger.debug("Turn detected as fragment, stored as pending", {
-        transcription: truncatedTranscription,
-      });
-      return;
-    }
 
     this.turns.push(turn);
 
@@ -156,43 +122,13 @@ export class ConversationContext {
   }
 
   /**
-   * Returns a formatted context block for appending to the system prompt.
-   *
-   * Returns an empty string if:
-   * - No turns are available (first chunk)
-   * - All turns are stale (long pause in conversation)
-   *
-   * IMPORTANT: Only includes source-side transcriptions (not prior model
-   * translations) to prevent error propagation. If a previous translation
-   * was wrong (e.g., "weather" → "जल्दी"), including that translation in
-   * context would cause the model to copy the error verbatim.
-   *
-   * Format:
-   * ```
-   * Recent conversation for reference (use ONLY for resolving pronouns and ambiguity, do NOT translate this):
-   * [Speaker-A] "How long have you had this headache?"
-   * [Speaker-B] "It started about 3 days ago"
-   * ```
+   * Returns the raw dialogue turns for prompt injection.
    */
-  getContextBlock(): string {
+  getContextTurns(): DialogueTurn[] {
     // Purge stale turns
     this.purgeStale();
-
-    if (this.turns.length === 0) {
-      return "";
-    }
-
-    const lines = this.turns.map(
-      (turn) =>
-        `[Speaker-${turn.speakerLabel}] "${turn.transcription}"`,
-    );
-
-    return [
-      "",
-      "Recent conversation for reference (use ONLY for resolving pronouns and ambiguity, do NOT translate this):",
-      ...lines,
-      "",
-    ].join("\n");
+    
+    return [...this.turns];
   }
 
   /**
@@ -217,7 +153,6 @@ export class ConversationContext {
   reset(): void {
     const previousSize = this.turns.length;
     this.turns = [];
-    this.pendingFragment = null;
     this.speakerMap.clear();
     this.speakerCounter = 0;
 
@@ -315,59 +250,7 @@ export class ConversationContext {
     return text.substring(0, maxChars - 3) + "...";
   }
 
-  /**
-   * Detects if a transcription is a dangling fragment that ends mid-sentence.
-   *
-   * A fragment is a short transcription that ends with a function word
-   * (article, preposition, conjunction, auxiliary verb), indicating the
-   * speaker was interrupted mid-thought by the chunk boundary.
-   *
-   * Examples of fragments:
-   * - "How is the" (ends with article)
-   * - "I want to" (ends with preposition)
-   * - "She said that" (ends with conjunction)
-   *
-   * NOT fragments:
-   * - "How are you feeling today?" (complete sentence)
-   * - "Take two tablets" (complete instruction)
-   * - "Yes" (short but complete)
-   */
-  private detectFragment(text: string): boolean {
-    const trimmed = text.trim();
-
-    // Very short text (< 5 words) ending with a function word is likely a fragment
-    const words = trimmed.split(/\s+/).filter((w) => w.length > 0);
-    if (words.length === 0) return false;
-
-    // If text ends with sentence-ending punctuation, it's not a fragment
-    if (/[.!?]\s*$/.test(trimmed)) return false;
-
-    // Function words that indicate a sentence was cut off mid-thought
-    const FUNCTION_WORDS = new Set([
-      // Articles
-      "the", "a", "an",
-      // Prepositions
-      "to", "of", "in", "on", "at", "for", "with", "from", "by", "about",
-      // Conjunctions
-      "and", "or", "but", "that", "because", "since", "although", "while",
-      // Auxiliary verbs (when sentence-final, they indicate continuation)
-      "is", "are", "was", "were", "will", "would", "can", "could",
-      "should", "shall", "do", "does", "did", "has", "have", "had",
-      // Pronouns (when sentence-final)
-      "I", "my", "your", "his", "her", "its", "our", "their",
-      // Other
-      "very", "really", "also", "just", "not",
-    ]);
-
-    const lastWord = words[words.length - 1].toLowerCase().replace(/[.,;:!?]$/, "");
-
-    // Fragment = ends with function word AND is short (< 5 words)
-    if (words.length < 5 && FUNCTION_WORDS.has(lastWord)) {
-      return true;
-    }
-
-    return false;
-  }
+  // Removed detectFragment method (replaced by robust TextSegmenter logic)
 
   /**
    * Gets context metrics for monitoring.

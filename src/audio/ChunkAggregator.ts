@@ -36,6 +36,7 @@ export interface ChunkAggregatorConfig {
   targetChunkDurationMs: number; // Soft ceiling for chunk size (3000ms default)
   minChunkDurationMs: number; // Minimum chunk to send: 800ms
   maxChunkDurationMs: number; // Safety cap for continuous speech: 5000ms
+  chunkOverlapMs: number; // Overlap with previous chunk to prevent mid-word cuts
 
   // Adaptive chunking (mechanism built in Phase 3, logic in Phase 4)
   adaptiveChunkingEnabled: boolean;
@@ -55,6 +56,7 @@ export const DEFAULT_CHUNK_CONFIG: ChunkAggregatorConfig = {
   targetChunkDurationMs: 3000, // 3s target — soft ceiling for chunk size
   minChunkDurationMs: 800, // Allow natural short utterances ("yes", "okay thank you")
   maxChunkDurationMs: 5000, // Max 5 seconds — safety cap for continuous speech
+  chunkOverlapMs: 1500, // 1.5s overlap to ensure words aren't cut at chunk boundaries
   adaptiveChunkingEnabled: false, // Disabled until Phase 4
   debugMode: false,
 };
@@ -76,6 +78,7 @@ export interface AudioChunk {
   chunkId: string;
   agentId: string;
   timestamp: number;
+  audioStartTime: number; // Absolute start time of this chunk's audio (useful for STT dedup)
   durationMs: number;
   sampleRate: number;
   samples: Float32Array;
@@ -93,6 +96,7 @@ interface AggregatorState {
   silenceDurationMs: number;
   collectedSamples: Float32Array[];
   totalSamplesCollected: number;
+  previousChunkTail: Float32Array; // Stored overlap from previous chunk
 }
 
 /**
@@ -135,6 +139,7 @@ export class ChunkAggregator extends EventEmitter {
       silenceDurationMs: 0,
       collectedSamples: [],
       totalSamplesCollected: 0,
+      previousChunkTail: new Float32Array(0),
     };
   }
 
@@ -170,12 +175,23 @@ export class ChunkAggregator extends EventEmitter {
     if (!this.state.isCollecting) {
       // Start new collection
       this.state.isCollecting = true;
-      this.state.speechStartTime = now;
-      this.state.collectedSamples = [];
-      this.state.totalSamplesCollected = 0;
+      
+      // If we have a tail from the previous chunk, prepend it and adjust start time
+      const tailLength = this.state.previousChunkTail.length;
+      if (tailLength > 0) {
+        const tailDurationMs = (tailLength / this.config.sampleRate) * 1000;
+        this.state.speechStartTime = now - tailDurationMs;
+        this.state.collectedSamples = [this.state.previousChunkTail];
+        this.state.totalSamplesCollected = tailLength;
+        logger.debug("Prepended overlap to new chunk", { tailDurationMs });
+      } else {
+        this.state.speechStartTime = now;
+        this.state.collectedSamples = [];
+        this.state.totalSamplesCollected = 0;
+      }
 
       logger.debug("Started collecting speech", {
-        timestamp: now,
+        timestamp: this.state.speechStartTime,
         rms: frame.rms.toFixed(4),
       });
     }
@@ -290,6 +306,7 @@ export class ChunkAggregator extends EventEmitter {
       chunkId,
       agentId: this.config.agentId,
       timestamp,
+      audioStartTime: this.state.speechStartTime!,
       durationMs,
       sampleRate: this.config.sampleRate,
       samples: mergedSamples,
@@ -310,12 +327,26 @@ export class ChunkAggregator extends EventEmitter {
     // Emit event for consumers
     this.emit("chunk", chunk);
 
-    // Reset state for next chunk
-    this.resetState();
+    // Extract the tail for the NEXT chunk's overlap BEFORE resetting state
+    // We want the last chunkOverlapMs of audio
+    const overlapSamplesNeeded = Math.floor(
+      (this.config.chunkOverlapMs / 1000) * this.config.sampleRate
+    );
+    let nextChunkTail = new Float32Array(0);
+    
+    if (mergedSamples.length > overlapSamplesNeeded) {
+      nextChunkTail = mergedSamples.slice(mergedSamples.length - overlapSamplesNeeded);
+    } else {
+      nextChunkTail = mergedSamples.slice();
+    }
+
+    // Reset state for next chunk, preserving the tail
+    this.resetState(nextChunkTail);
   }
 
   /**
    * Merges multiple Float32Arrays into one.
+
    */
   private mergeSamples(arrays: Float32Array[]): Float32Array {
     const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
@@ -342,9 +373,11 @@ export class ChunkAggregator extends EventEmitter {
 
   /**
    * Resets the aggregator state for next collection.
+   * @param previousChunkTail Optional overlap to carry over to the next chunk
    */
-  private resetState(): void {
+  private resetState(previousChunkTail: Float32Array = new Float32Array(0)): void {
     this.state = this.createInitialState();
+    this.state.previousChunkTail = previousChunkTail;
   }
 
   /**

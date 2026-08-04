@@ -38,12 +38,10 @@ CRITICAL — Anti-hallucination rules:
 - Example: "ابھی بخار" → "Fever right now" (NOT "He still has a fever.")
 
 Context handling rules:
-- You may receive recent conversation history above the text to translate.
-- Use this context ONLY to resolve ambiguity: pronouns, partial phrases, consistent terminology.
-- Do NOT repeat, summarize, or translate the context. It is reference only.
-- Do NOT let context override what is explicitly said in the current text.
-- If the current text contradicts the context, follow the current text.
-- Output ONLY the translation of the text after "Text to translate:".
+- You will receive previous turns as conversation history in the chat.
+- Earlier turns are prior context for consistent terminology and pronouns.
+- Use this context ONLY to resolve ambiguity.
+- Translate ONLY the most recent transcript enclosed in [TRANSLATE] markers. NEVER repeat earlier translations.
 
 Translate meaning, not word-for-word for idioms:
   "तकलीफ़ है" / "تکلیف ہے" → "I am in pain"
@@ -87,10 +85,10 @@ CRITICAL — Anti-hallucination rules:
 - If the input ends abruptly with a broken word (e.g., "nice ta"), ignore the broken fragment. Do not attempt to guess it.
 
 Context handling:
-- Recent conversation history may appear above "Text to translate:". Use it ONLY to resolve pronouns or ambiguous references.
-- Do NOT translate, repeat, or summarize the context.
-- Do NOT copy wording from previous translations in the context. Translate the current text fresh — if an earlier translation contains an error, do not repeat it.
-- Output ONLY the translation of the current text.
+- You will receive previous turns as conversation history in the chat.
+- Earlier turns are prior context for consistent terminology and pronouns.
+- Use this context ONLY to resolve ambiguity.
+- Translate ONLY the most recent transcript enclosed in [TRANSLATE] markers. NEVER repeat earlier translations.
 
 Key vocabulary (use exactly):
 - weather = मौसम → "How is the weather there?" = "वहाँ का मौसम कैसा है?"
@@ -232,10 +230,10 @@ CRITICAL — Anti-hallucination rules:
 - If the input ends abruptly with a broken word (e.g., "nice ta"), ignore the broken fragment. Do not attempt to guess it.
 
 Context handling:
-- Recent conversation history may appear above "Text to translate:". Use it ONLY to resolve pronouns or ambiguous references.
-- Do NOT translate, repeat, or summarize the context.
-- Do NOT copy wording from previous translations in the context. Translate the current text fresh.
-- Output ONLY the translation of the current text.
+- You will receive previous turns as conversation history in the chat.
+- Earlier turns are prior context for consistent terminology and pronouns.
+- Use this context ONLY to resolve ambiguity.
+- Translate ONLY the most recent transcript enclosed in [TRANSLATE] markers. NEVER repeat earlier translations.
 
 Key vocabulary (use exactly):
 - pain = ألم; headache = صداع; fever = حمى; stomach ache = ألم في البطن

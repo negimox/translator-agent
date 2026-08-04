@@ -171,19 +171,29 @@ export class MizanTranslation implements ITranslationProvider {
     const wrappedText = `[TRANSLATE]\n${request.text}\n[/TRANSLATE]`;
 
     // Get the system prompt and few-shot examples for the target language
-    const promptData = this.getPromptData(
-      request.targetLanguage,
-      request.conversationContext,
-    );
+    const promptData = this.getPromptData(request.targetLanguage);
+
+    // Build the messages array
+    const messages: Array<{ role: string; content: string }> = [
+      { role: "system", content: promptData.systemPrompt },
+      ...(promptData.examples || []),
+    ];
+
+    // Inject history as explicit chat turns if provided
+    if (Array.isArray(request.conversationContext) && request.conversationContext.length > 0) {
+      for (const turn of request.conversationContext) {
+        messages.push({ role: "user", content: `New transcript:\n${turn.transcription}` });
+        messages.push({ role: "assistant", content: turn.translation });
+      }
+    }
+
+    // Add the current request
+    messages.push({ role: "user", content: wrappedText });
 
     // OpenAI-compatible chat completions body
     const body = {
       model: modelName,
-      messages: [
-        { role: "system", content: promptData.systemPrompt },
-        ...(promptData.examples || []),
-        { role: "user", content: wrappedText },
-      ],
+      messages,
       temperature: 0.1,
       top_p: 0.95,
       max_tokens: 1024,
@@ -351,13 +361,9 @@ export class MizanTranslation implements ITranslationProvider {
 
   /**
    * Returns the system prompt and few-shot examples for a given target language.
-   *
-   * If conversationContext is provided, it is appended to the system prompt
-   * before the "Text to translate:" marker (system-prompt-append pattern).
    */
   private getPromptData(
     targetLanguage: string,
-    conversationContext?: string,
   ): { systemPrompt: string; examples?: Array<{ role: string; content: string }> } {
     const prompts: Record<string, string> = {
       en: SYSTEM_PROMPT_EN,
@@ -379,25 +385,6 @@ export class MizanTranslation implements ITranslationProvider {
     }
 
     const examples = examplesMap[targetLanguage];
-
-    // Inject conversation context into the system prompt if available.
-    // The context is inserted just before "Text to translate:" to keep
-    // it in instruction space (avoids user-message injection confusion).
-    if (conversationContext) {
-      // Find "Text to translate:" and insert context before it
-      const marker = "Text to translate:";
-      const markerIndex = prompt.lastIndexOf(marker);
-      if (markerIndex !== -1) {
-        prompt =
-          prompt.substring(0, markerIndex) +
-          conversationContext +
-          "\n" +
-          prompt.substring(markerIndex);
-      } else {
-        // No marker found — append context at the end
-        prompt += "\n" + conversationContext;
-      }
-    }
 
     return { systemPrompt: prompt, examples };
   }

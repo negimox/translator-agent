@@ -682,12 +682,10 @@ export class TranslationPipeline extends EventEmitter {
       finalTranscription = validWords.join("");
       
       // We don't commit the *very end* of the chunk, because the last word might have been cut off.
-      // Wait, with overlapping chunks, the next chunk will contain the last 1.5s of THIS chunk.
-      // So we should only commit up to `chunk.audioStartTime + chunk.durationMs - overlapMs`.
-      // Actually, we can commit up to maxWordEnd - 1000ms (to allow the last second to be re-evaluated).
-      const overlapBufferMs = 1500; // Match chunkOverlapMs
-      const absoluteChunkEndMs = chunk.audioStartTime + chunk.durationMs;
-      const newCommittedUntil = absoluteChunkEndMs - overlapBufferMs;
+      // The next chunk will overlap the last 1500ms. We should commit up to the end of the words
+      // we've confidently recognized, leaving a small 300ms safety buffer for the final word.
+      const safetyBufferMs = 300;
+      const newCommittedUntil = maxWordEnd > chunk.audioStartTime ? maxWordEnd - safetyBufferMs : chunk.audioStartTime;
       
       this.speakerCommittedUntil.set(speakerKey, Math.max(committedUntil, newCommittedUntil));
 
@@ -736,13 +734,13 @@ export class TranslationPipeline extends EventEmitter {
     finalTranscription = sentences.join(" ");
 
     // Step 2: Translation (Mizan) — with conversation context
-    const contextTurns = this.conversationContext.getContextTurns();
+    const conversationContext = this.conversationContext.getContextBlock();
     const translationStart = Date.now();
     const translationResult = await this.translationProvider!.translate({
       text: finalTranscription,
       sourceLanguage: this.config.sourceLanguage,
       targetLanguage: this.config.targetLanguage,
-      conversationContext: contextTurns.length > 0 ? contextTurns : undefined,
+      conversationContext,
     });
     this.totalTranslationLatencyMs += Date.now() - translationStart;
 
@@ -758,7 +756,7 @@ export class TranslationPipeline extends EventEmitter {
         text: finalTranscription,
         sourceLanguage: this.config.sourceLanguage,
         targetLanguage: this.config.targetLanguage,
-        conversationContext: contextTurns.length > 0 ? contextTurns : undefined,
+        conversationContext,
       });
       if (retryResult.text && !cjkRegex.test(retryResult.text)) {
         translation = retryResult.text;
@@ -788,7 +786,7 @@ export class TranslationPipeline extends EventEmitter {
     logger.debug("Translation completed (Mizan)", {
       chunkId: chunk.chunkId,
       translation: translation.substring(0, 50),
-      contextUsed: contextTurns.length > 0,
+      contextUsed: !!conversationContext,
     });
 
     // Step 2c: Validate translation quality

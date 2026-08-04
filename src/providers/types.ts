@@ -42,7 +42,7 @@ export interface TranslationRequest {
   /** Target language code */
   targetLanguage: string;
   /** Optional conversation context for continuity across chunks */
-  conversationContext?: any;
+  conversationContext?: string;
 }
 
 /**

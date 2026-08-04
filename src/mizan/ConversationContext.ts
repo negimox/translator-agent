@@ -122,13 +122,43 @@ export class ConversationContext {
   }
 
   /**
-   * Returns the raw dialogue turns for prompt injection.
+   * Returns a formatted context block for appending to the system prompt.
+   *
+   * Returns an empty string if:
+   * - No turns are available (first chunk)
+   * - All turns are stale (long pause in conversation)
+   *
+   * IMPORTANT: Only includes source-side transcriptions (not prior model
+   * translations) to prevent error propagation. If a previous translation
+   * was wrong (e.g., "weather" → "जल्दी"), including that translation in
+   * context would cause the model to copy the error verbatim.
+   *
+   * Format:
+   * \`\`\`
+   * Recent conversation for reference (use ONLY for resolving pronouns and ambiguity, do NOT translate this):
+   * [Speaker-A] "How long have you had this headache?"
+   * [Speaker-B] "It started about 3 days ago"
+   * \`\`\`
    */
-  getContextTurns(): DialogueTurn[] {
+  getContextBlock(): string {
     // Purge stale turns
     this.purgeStale();
-    
-    return [...this.turns];
+
+    if (this.turns.length === 0) {
+      return "";
+    }
+
+    const lines = this.turns.map(
+      (turn) =>
+        `[Speaker-${turn.speakerLabel}] "${turn.transcription}"`,
+    );
+
+    return [
+      "",
+      "Recent conversation for reference (use ONLY for resolving pronouns and ambiguity, do NOT translate this):",
+      ...lines,
+      "",
+    ].join("\n");
   }
 
   /**

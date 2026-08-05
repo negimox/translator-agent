@@ -165,6 +165,10 @@ getSTTProvider('elevenlabs', {
    - Graceful reconnection handling
    - State preservation during reconnects
 
+3. `src/providers/types.ts`
+   - Added `reconnected` event to `IRealtimeSTTProvider` interface
+   - Ensures type safety for the new reconnection event
+
 ## Next Steps
 
 1. **Deploy and test** in a live meeting

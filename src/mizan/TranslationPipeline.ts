@@ -267,19 +267,19 @@ export class TranslationPipeline extends EventEmitter {
   
   static getVoiceForLanguage(language: string): string {
     const voiceMap: Record<string, string> = {
-      en: "af_heart", // American English female
-      hi: "hm_psi", // Hindi male — best quality for Hindi
-      ur: "hm_psi", // Urdu — uses Hindi voice (mutually intelligible)
-      ar: "hm_psi", // Arabic — romanized/transliterated text read by Hindi voice
-      es: "ef_dora", // Spanish female
-      fr: "ff_siwis", // French female
-      ja: "jf_alpha", // Japanese female
-      zh: "zf_xiaoxiao", // Mandarin female
-      it: "if_sara", // Italian female
-      pt: "pf_dora", // Brazilian Portuguese female
+      en: "JBFqnCBsd6RMkjVDRZzb", // George - narrative male voice
+      hi: "EXAVITQu4vr4xnSDxMaL", // Sarah - soft female (multilingual)
+      ur: "EXAVITQu4vr4xnSDxMaL", // Sarah - Urdu uses multilingual voice
+      ar: "onwK4e9ZLuTAKqWW03F9", // Daniel - authoritative male (multilingual)
+      es: "XB0fDUnXU5powFXDhCwa", // Charlotte - conversational female
+      fr: "XB0fDUnXU5powFXDhCwa", // Charlotte - conversational female
+      ja: "EXAVITQu4vr4xnSDxMaL", // Sarah - soft female (multilingual)
+      zh: "EXAVITQu4vr4xnSDxMaL", // Sarah - soft female (multilingual)
+      it: "XB0fDUnXU5powFXDhCwa", // Charlotte - conversational female
+      pt: "XB0fDUnXU5powFXDhCwa", // Charlotte - conversational female
     };
 
-    return voiceMap[language.toLowerCase()] || "af_heart";
+    return voiceMap[language.toLowerCase()] || "JBFqnCBsd6RMkjVDRZzb";
   }
 
   getMetrics() {

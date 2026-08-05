@@ -20,6 +20,7 @@ import {
   SYSTEM_PROMPT_HI,
   SYSTEM_PROMPT_UR,
   SYSTEM_PROMPT_AR,
+  EXAMPLES_EN,
   EXAMPLES_HI,
   EXAMPLES_UR,
   EXAMPLES_AR,
@@ -186,7 +187,8 @@ export class MizanTranslation implements ITranslationProvider {
       ],
       temperature: 0.1,
       top_p: 0.95,
-      max_tokens: 1024,
+      max_tokens: 2048,
+      max_completion_tokens: 2048,
     };
 
     logger.debug("Sending translation request (passthrough)", {
@@ -367,6 +369,7 @@ export class MizanTranslation implements ITranslationProvider {
     };
     
     const examplesMap: Record<string, Array<{ role: string; content: string }>> = {
+      en: EXAMPLES_EN,
       hi: EXAMPLES_HI,
       ur: EXAMPLES_UR,
       ar: EXAMPLES_AR,

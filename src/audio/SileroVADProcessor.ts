@@ -35,7 +35,8 @@ export class SileroVADProcessor {
         }
       },
     });
-    logger.info("Silero VAD initialized");
+    this.vad.start();
+    logger.info("Silero VAD initialized and started");
   }
 
   /**

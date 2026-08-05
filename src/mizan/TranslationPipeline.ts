@@ -85,7 +85,10 @@ export class TranslationPipeline extends EventEmitter {
     this.config = { ...DEFAULT_PIPELINE_CONFIG, ...config };
 
     if (this.config.useElevenLabs && this.config.providerFactory) {
-      this.sttProvider = this.config.providerFactory.getSTTProvider('elevenlabs');
+      this.sttProvider = this.config.providerFactory.getSTTProvider('elevenlabs', {
+        languageCode: this.config.sourceLanguage,
+        instanceId: this.config.sourceLanguage,
+      });
       this.translationProvider = this.config.providerFactory.getTranslationProvider('mizan');
       this.ttsProvider = this.config.providerFactory.getTTSProvider('elevenlabs');
       

@@ -8,6 +8,7 @@ const logger = createLogger("ElevenLabsRealtimeSTT");
 export interface ElevenLabsRealtimeConfig {
   apiKey: string;
   modelId: string;
+  languageCode?: string;
 }
 
 export const DEFAULT_REALTIME_CONFIG: Partial<ElevenLabsRealtimeConfig> = {
@@ -33,7 +34,10 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
     this.isConnecting = true;
 
     return new Promise((resolve, reject) => {
-      const url = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${this.config.modelId}`;
+      let url = `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${this.config.modelId}`;
+      if (this.config.languageCode) {
+        url += `&language_code=${this.config.languageCode}`;
+      }
       
       this.ws = new WebSocket(url, {
         headers: {
@@ -44,18 +48,6 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
       this.ws.on("open", () => {
         logger.info("Connected to ElevenLabs Realtime STT");
         this.isConnecting = false;
-        
-        // Send initial configuration
-        const configMessage = {
-          message_type: "session_started",
-          config: {
-            model_id: this.config.modelId,
-            audio_format: "pcm_16000",
-            sample_rate: 16000,
-            language_code: null,
-          }
-        };
-        this.ws?.send(JSON.stringify(configMessage));
         resolve();
       });
 

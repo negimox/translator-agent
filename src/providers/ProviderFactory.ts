@@ -86,11 +86,12 @@ export class ProviderFactory {
     });
   }
 
-  /**
-   * Gets an STT provider instance.
-   */
-  getSTTProvider(type: STTProviderType = "elevenlabs"): IRealtimeSTTProvider {
-    const cached = this.instances.stt.get(type);
+  getSTTProvider(
+    type: STTProviderType = "elevenlabs",
+    options?: { languageCode?: string; instanceId?: string }
+  ): IRealtimeSTTProvider {
+    const cacheKey = `${type}_${options?.instanceId || 'default'}`;
+    const cached = this.instances.stt.get(cacheKey);
     if (cached) {
       return cached;
     }
@@ -104,14 +105,15 @@ export class ProviderFactory {
         }
         provider = new ElevenLabsRealtimeSTT({
           apiKey: this.config.elevenlabs.apiKey,
+          languageCode: options?.languageCode,
         });
         break;
       default:
         throw new Error(`Unknown STT provider type: ${type}`);
     }
 
-    this.instances.stt.set(type, provider);
-    logger.info("STT provider created", { type, name: provider.name });
+    this.instances.stt.set(cacheKey, provider);
+    logger.info("STT provider created", { type, name: provider.name, cacheKey });
     return provider;
   }
 

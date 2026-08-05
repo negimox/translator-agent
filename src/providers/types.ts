@@ -118,6 +118,7 @@ export interface IRealtimeSTTProvider {
   on(event: 'committed', listener: (data: { text: string; language: string }) => void): this;
   on(event: 'error', listener: (error: any) => void): this;
   on(event: 'close', listener: () => void): this;
+  on(event: 'reconnected', listener: () => void): this;
 }
 
 /**

@@ -79,6 +79,7 @@ export interface AudioChunk {
   agentId: string;
   timestamp: number;
   audioStartTime: number; // Absolute start time of this chunk's audio (useful for STT dedup)
+  hasOverlapTail: boolean; // True if this chunk has overlap audio from a forced mid-speech cut
   durationMs: number;
   sampleRate: number;
   samples: Float32Array;
@@ -314,6 +315,7 @@ export class ChunkAggregator extends EventEmitter {
       agentId: this.config.agentId,
       timestamp,
       audioStartTime: this.state.speechStartTime!,
+      hasOverlapTail: this.state.wasForcedCut,
       durationMs,
       sampleRate: this.config.sampleRate,
       samples: mergedSamples,

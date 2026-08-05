@@ -140,21 +140,12 @@ export class ElevenLabsSTT implements ISTTProvider {
         confidence: data.language_probability,
       });
 
-      // Filter words array to only include actual spoken word tokens.
-      // ElevenLabs returns 3 token types: "word" (spoken), "spacing" (whitespace),
-      // and "audio_event" (laughter, etc). Only "word" tokens have meaningful
-      // start/end timestamps for deduplication; spacing tokens have near-zero
-      // duration and pollute the committed-until boundary calculation.
-      const spokenWords = (data.words || []).filter(
-        (w) => !w.type || w.type === "word"
-      );
-
       return {
         text: data.text || "",
         detectedLanguage: data.language_code,
         confidence: data.language_probability,
         metadata: {
-          words: spokenWords,
+          words: data.words || [],
           provider: this.name,
           latencyMs,
         },

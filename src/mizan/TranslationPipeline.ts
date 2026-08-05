@@ -656,7 +656,12 @@ export class TranslationPipeline extends EventEmitter {
     // Step 1.5: Audio Overlap Deduplication
     let finalTranscription = transcription;
     const speakerKey = speakerId || "unknown_speaker";
-    const words = sttResult.metadata?.words as Array<{ text: string; start: number; end: number }> | undefined;
+    const words = sttResult.metadata?.words as Array<{ 
+      text: string; 
+      start: number; 
+      end: number;
+      type?: "word" | "spacing" | "audio_event";
+    }> | undefined;
     
     if (words && words.length > 0) {
       const committedUntil = this.speakerCommittedUntil.get(speakerKey) || 0;
@@ -672,9 +677,13 @@ export class TranslationPipeline extends EventEmitter {
           validWords.push(word.text);
         }
         
-        const absoluteEndMs = chunk.audioStartTime + (word.end * 1000);
-        if (absoluteEndMs > maxWordEnd) {
-          maxWordEnd = absoluteEndMs;
+        // Only let actual spoken words advance the maxWordEnd used for the committed boundary.
+        // Spacing tokens have near-zero duration and arbitrary endpoints, which pollutes the math.
+        if (!word.type || word.type === "word") {
+          const absoluteEndMs = chunk.audioStartTime + (word.end * 1000);
+          if (absoluteEndMs > maxWordEnd) {
+            maxWordEnd = absoluteEndMs;
+          }
         }
       }
 
@@ -731,7 +740,7 @@ export class TranslationPipeline extends EventEmitter {
     // when time-based word dedup fails (timestamp domain mismatch, missing timestamps)
     // because it operates on the text itself rather than audio timestamps.
     const previousTail = this.speakerLastTranscriptionTail.get(speakerKey) || "";
-    if (previousTail) {
+    if (previousTail && chunk.hasOverlapTail) {
       const deduped = mergeOverlapText(previousTail, finalTranscription);
       if (deduped !== finalTranscription) {
         logger.debug("Text-level overlap dedup applied", {
@@ -742,6 +751,10 @@ export class TranslationPipeline extends EventEmitter {
         });
         finalTranscription = deduped;
       }
+    } else if (previousTail && !chunk.hasOverlapTail) {
+      logger.debug("Skipped text-level dedup (clean VAD cut, no overlap tail)", {
+        chunkId: chunk.chunkId,
+      });
     }
 
     // Guard: if text-level dedup emptied the transcription, skip this chunk

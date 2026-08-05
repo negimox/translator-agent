@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "elevenlabs:sdk-migration": {
+      "source": "elevenlabs/packages",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/elevenlabs:sdk-migration/SKILL.md",
+      "computedHash": "d75c6105bbc300e89da9a0b812d8a8d3b6e22ed9ce9e91bca2594599bd125638"
+    },
     "speech-to-text": {
       "source": "elevenlabs/skills",
       "sourceType": "github",

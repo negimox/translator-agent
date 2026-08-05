@@ -220,7 +220,7 @@ export class TranslationPipeline extends EventEmitter {
       }
     }
 
-    const mappedLang = this.mapLanguageCode(detectedLanguage || "en");
+    const mappedLang = this.mapLanguageCode(detectedLanguage || "unknown");
     if (mappedLang === this.config.targetLanguage) {
       logger.debug("Detected language matches target, skipping translation", {
         detectedLanguage,

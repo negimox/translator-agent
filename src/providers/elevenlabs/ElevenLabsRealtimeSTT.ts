@@ -210,7 +210,8 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
 
     this.connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data) => {
       if (data.text) {
-        this.emit("partial", { text: data.text, language: this.config.languageCode || "" });
+        // @ts-ignore - language_code might exist depending on sdk version/config
+        this.emit("partial", { text: data.text, language: data.language_code || "" });
       }
     });
 
@@ -222,7 +223,8 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
       }
       this.emit("committed", {
         text: data.text,
-        language: this.config.languageCode || "",
+        // @ts-ignore - language_code might exist depending on sdk version/config
+        language: data.language_code || "",
       });
     });
 

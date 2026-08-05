@@ -45,11 +45,6 @@ class TranslatorAudioProcessor extends AudioWorkletProcessor {
         // VAD configuration (Phase 3)
         const processorOptions = options.processorOptions || {};
         this.rmsThreshold = processorOptions.rmsThreshold || 0.01; // -40dB default
-        this.vadSmoothingFrames = processorOptions.vadSmoothingFrames || 3;
-        
-        // VAD state
-        this.vadHistory = [];
-        this.isSpeechActive = false;
         
         console.log('[Worklet] TranslatorAudioProcessor created with options:', processorOptions);
     }
@@ -68,32 +63,7 @@ class TranslatorAudioProcessor extends AudioWorkletProcessor {
         return Math.sqrt(sumSquares / samples.length);
     }
 
-    /**
-     * Determines if the current frame contains speech based on RMS threshold.
-     * Uses a smoothing window to avoid rapid toggling.
-     */
-    detectVoiceActivity(rms) {
-        const isAboveThreshold = rms >= this.rmsThreshold;
-        
-        // Add to history
-        this.vadHistory.push(isAboveThreshold);
-        if (this.vadHistory.length > this.vadSmoothingFrames) {
-            this.vadHistory.shift();
-        }
-        
-        // Require majority of recent frames to be speech
-        const speechCount = this.vadHistory.filter(v => v).length;
-        const threshold = Math.ceil(this.vadSmoothingFrames / 2);
-        
-        // Hysteresis: easier to stay in speech state than to enter it
-        if (this.isSpeechActive) {
-            this.isSpeechActive = speechCount >= 1; // Stay active if any recent speech
-        } else {
-            this.isSpeechActive = speechCount >= threshold; // Need majority to activate
-        }
-        
-        return this.isSpeechActive;
-    }
+
 
     process(inputs, outputs, parameters) {
         const input = inputs[0];
@@ -125,18 +95,17 @@ class TranslatorAudioProcessor extends AudioWorkletProcessor {
                 }
             }
             
-            // Calculate RMS for VAD
+            // Calculate RMS for debugging
             const rms = this.calculateRMS(samples);
-            const isSpeech = this.detectVoiceActivity(rms);
             
-            // Post audio data with VAD info to main thread
+            // Post audio data to main thread
             this.port.postMessage({
                 type: 'audioData',
                 data: samples.slice(), // Copy the Float32Array
                 timestamp: currentTime,
                 frameCount: this.frameCount++,
                 rms: rms,
-                isSpeech: isSpeech
+                isSpeech: false // Deprecated: VAD is now handled on the backend via SileroVADProcessor
             });
         }
         

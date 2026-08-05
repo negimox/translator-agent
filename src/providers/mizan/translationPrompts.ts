@@ -83,7 +83,7 @@ CRITICAL — Anti-hallucination rules:
 - Do NOT add medical words (दर्द, बुखार, दवा), time words (आज, अभी), pronouns, or objects that are not in the source.
 - Example: "Or are you feeling any" → "या आपको कोई" (NOT "या आपको आज कोई दर्द हो रहा है?")
 - Example: "Okay, I'll advise you to take" → "ठीक है, मैं आपको लेने की सलाह दूँगा" (do NOT add "दवाएँ")
-- Do NOT phonetically transliterate English words into unrelated Hindi words (e.g., do not translate "meet" as "मिट्टी"). Translate the meaning accurately based on context.
+- Do NOT phonetically transliterate English words into unrelated Hindi words (e.g., do not translate "meeting" as "मिट्टी" or "मिट्टियाँ"). Keep common English loanwords (like "meeting", "test") in Latin script exactly as written in the source.
 - If the input ends abruptly with a broken word (e.g., "nice ta"), ignore the broken fragment. Do not attempt to guess it.
 
 Context handling:
@@ -163,7 +163,7 @@ Core Rules:
 1. You MUST first think step-by-step in a <think> block and then output your final translation in a <translate> block. Example: <think> Reasoning process... </think>\n<translate> Final output </translate>
 2. Inside the <translate> block, output ONLY the translated Urdu text. No quotes, no explanations, no labels.
 3. Use ONLY Urdu script (Nastaliq). NEVER output Devanagari (Hindi) characters. NEVER output Cyrillic or Chinese characters.
-4. Keep common English loanwords (like 'meeting', 'test', 'doctor') in Latin script if natural.
+4. Keep common English loanwords (like 'meeting', 'test', 'doctor', 'injection', 'report') in Latin script EXACTLY as written in the source. Do NOT phonetically transliterate them into Nastaliq script (e.g., do not write 'meeting' as 'میٹنگ' or some unrelated word, just output 'meeting').
 5. Translate meaning naturally. Do not translate word-for-word. Conversational phrases like "Okay, talk to you later" should be natural like "ٹھیک ہے، بعد میں بات کرتے ہیں۔".
 6. Use "آپ" consistently for "you". 
 
@@ -172,6 +172,10 @@ Medical Terminology:
 - fever = بخار
 - stomach ache = پیٹ درد
 - medicine = دوا
+
+CRITICAL — Anti-hallucination rules:
+- Do NOT phonetically transliterate English words into unrelated Urdu words.
+- If the input is an incomplete fragment, translate ONLY the words present.
 
 Text to translate:`;
 
@@ -228,7 +232,7 @@ CRITICAL — Anti-hallucination rules:
 - Do NOT add medical words (ألم، حمى، دواء), time words, pronouns, or objects that are not in the source.
 - Example: "Or are you feeling any" → "أو هل تشعر بأي" (do NOT add "ألم")
 - Example: "Okay, I'll advise you to take" → "حسنا، سأنصحك بأن تأخذ" (do NOT add "الدواء")
-- Do NOT phonetically transliterate English words into unrelated Arabic words. Translate the meaning accurately based on context.
+- Do NOT phonetically transliterate English loanwords (like "meeting", "test") into unrelated Arabic words. Keep them in Latin script exactly as written in the source.
 - If the input ends abruptly with a broken word (e.g., "nice ta"), ignore the broken fragment. Do not attempt to guess it.
 
 Context handling:

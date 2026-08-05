@@ -32,8 +32,6 @@ interface BrowserAudioFrame {
   samples: number[];
   timestamp: number;
   frameCount: number;
-  rms: number;
-  isSpeech: boolean;
 }
 
 /**
@@ -184,8 +182,6 @@ export class AudioBridge {
       const audioFrame: AudioFrame = {
         samples,
         timestamp: frame.timestamp,
-        isSpeech: frame.isSpeech,
-        rms: frame.rms,
       };
 
       // Send to aggregator for chunking

@@ -68,8 +68,6 @@ export const DEFAULT_CHUNK_CONFIG: ChunkAggregatorConfig = {
 export interface AudioFrame {
   samples: Float32Array;
   timestamp: number;
-  isSpeech: boolean;
-  rms: number;
 }
 
 /**
@@ -210,7 +208,6 @@ export class ChunkAggregator extends EventEmitter {
 
       logger.debug("Started collecting speech", {
         timestamp: this.state.speechStartTime,
-        rms: frame.rms.toFixed(4),
       });
     }
 

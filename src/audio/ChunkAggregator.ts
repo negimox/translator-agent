@@ -15,6 +15,7 @@
 import { EventEmitter } from "events";
 import { createLogger } from "../logger";
 import { encodeWav, WavMetadata } from "./WavEncoder";
+import { SileroVADProcessor } from "./SileroVADProcessor";
 
 const logger = createLogger("ChunkAggregator");
 
@@ -79,7 +80,8 @@ export interface AudioChunk {
   agentId: string;
   timestamp: number;
   audioStartTime: number; // Absolute start time of this chunk's audio (useful for STT dedup)
-  hasOverlapTail: boolean; // True if this chunk has overlap audio from a forced mid-speech cut
+  hasOverlapTail: boolean; // True if this chunk has overlap audio from the previous chunk
+  isSilenceCut: boolean; // True if emission was triggered by VAD silence (not a forced cut)
   durationMs: number;
   sampleRate: number;
   samples: Float32Array;
@@ -110,6 +112,7 @@ export class ChunkAggregator extends EventEmitter {
   private state: AggregatorState;
   private chunkCounter: number = 0;
   private currentTargetDurationMs: number;
+  private sileroVad: SileroVADProcessor;
 
   // Metrics
   private totalFramesReceived: number = 0;
@@ -128,6 +131,15 @@ export class ChunkAggregator extends EventEmitter {
       targetChunkDurationMs: this.config.targetChunkDurationMs,
       vadRmsThreshold: this.config.vadRmsThreshold,
     });
+    
+    this.sileroVad = new SileroVADProcessor(this.config.sampleRate);
+  }
+
+  /**
+   * Initialize async resources like Silero VAD model.
+   */
+  async initialize(): Promise<void> {
+    await this.sileroVad.initialize();
   }
 
   /**
@@ -150,14 +162,17 @@ export class ChunkAggregator extends EventEmitter {
    * Processes an incoming audio frame from the AudioWorklet.
    * This is the main entry point called from the Node.js bridge.
    */
-  processFrame(frame: AudioFrame): void {
+  async processFrame(frame: AudioFrame): Promise<void> {
     this.totalFramesReceived++;
 
     const now = Date.now();
     const frameDurationMs =
       (frame.samples.length / this.config.sampleRate) * 1000;
 
-    if (frame.isSpeech) {
+    // Use highly accurate neural VAD instead of the browser's naive RMS VAD
+    const isSpeech = await this.sileroVad.processAudio(frame.samples, now);
+
+    if (isSpeech) {
       this.handleSpeechFrame(frame, now, frameDurationMs);
     } else {
       this.handleSilenceFrame(frame, now, frameDurationMs);
@@ -316,6 +331,7 @@ export class ChunkAggregator extends EventEmitter {
       timestamp,
       audioStartTime: this.state.speechStartTime!,
       hasOverlapTail: this.state.wasForcedCut,
+      isSilenceCut: isCleanCut,
       durationMs,
       sampleRate: this.config.sampleRate,
       samples: mergedSamples,
@@ -327,7 +343,7 @@ export class ChunkAggregator extends EventEmitter {
 
     logger.info("Chunk emitted", {
       chunkId,
-      durationMs: durationMs.toFixed(0),
+      durationMs: Number(durationMs.toFixed(0)),
       samples: mergedSamples.length,
       wavSize: wavBuffer.byteLength,
       totalChunks: this.totalChunksEmitted,
@@ -338,31 +354,36 @@ export class ChunkAggregator extends EventEmitter {
 
     // Extract the tail for the NEXT chunk's overlap BEFORE resetting state.
     //
-    // KEY BEHAVIOR (mirrors live-translation's overlap_tail_start()):
-    // - Clean VAD cut: no overlap tail — the next chunk starts fresh. The speaker
-    //   paused at a natural boundary so there's no risk of cutting mid-word.
-    // - Forced mid-speech cut (hard cap): store a tail so the word straddling
-    //   the boundary is re-transcribed and caught by text-level dedup.
+    // KEY BEHAVIOR UPDATE:
+    // Unlike live-translation which uses a robust neural VAD, our RMS VAD is naive
+    // and frequently cuts mid-word on soft syllables (e.g. "health" -> "hea").
+    // To prevent dropping the ends of words, we ALWAYS overlap the tail into the
+    // next chunk, even on "clean" VAD cuts. The text-level dedup will seamlessly
+    // merge the overlapping words.
     let nextChunkTail = new Float32Array(0);
 
-    if (!isCleanCut) {
-      const overlapSamplesNeeded = Math.floor(
-        (this.config.chunkOverlapMs / 1000) * this.config.sampleRate
-      );
-      if (mergedSamples.length > overlapSamplesNeeded) {
-        nextChunkTail = mergedSamples.slice(mergedSamples.length - overlapSamplesNeeded);
-      } else {
-        nextChunkTail = mergedSamples.slice();
-      }
-      logger.debug("Overlap tail stored (forced mid-speech cut)", {
-        tailMs: (nextChunkTail.length / this.config.sampleRate * 1000).toFixed(0),
-      });
+    const overlapSamplesNeeded = Math.floor(
+      (this.config.chunkOverlapMs / 1000) * this.config.sampleRate,
+    );
+    if (mergedSamples.length > overlapSamplesNeeded) {
+      nextChunkTail = mergedSamples.slice(-overlapSamplesNeeded);
     } else {
-      logger.debug("No overlap tail (clean VAD cut) — next chunk starts fresh");
+      nextChunkTail = mergedSamples.slice();
     }
 
-    // Reset state for next chunk, preserving the tail (empty for clean cuts)
-    this.resetState(nextChunkTail, !isCleanCut);
+    logger.debug("Stored overlap tail for next chunk", {
+      tailMs: ((nextChunkTail.length / this.config.sampleRate) * 1000).toFixed(0),
+      wasCleanCut: isCleanCut,
+    });
+
+    // Reset state for next chunk
+    this.resetState();
+
+    // Inject the tail into the fresh state
+    this.state.previousChunkTail = nextChunkTail;
+    // We set wasForcedCut to true so the next chunk knows it has an overlap tail
+    // (even if it was a clean cut, we are forcing an overlap)
+    this.state.wasForcedCut = nextChunkTail.length > 0;
   }
 
   /**

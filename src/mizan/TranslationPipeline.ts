@@ -58,6 +58,18 @@ import {
 const logger = createLogger("TranslationPipeline");
 
 /**
+ * Custom error thrown when a chunk is skipped due to content rules 
+ * (e.g. empty, fully deduplicated, buffered fragment).
+ * This prevents it from being logged as a fatal failure.
+ */
+export class ContentSkippedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ContentSkippedError";
+  }
+}
+
+/**
  * Translation pipeline configuration.
  */
 export interface TranslationPipelineConfig {
@@ -512,12 +524,22 @@ export class TranslationPipeline extends EventEmitter {
         error instanceof Error ? error.message : String(error);
 
       // Only penalize circuit breaker for actual API failures,
-      // not for empty content results (which are content issues, not API issues)
+      // not for skipped content (which are content issues, not API issues)
       const isContentError =
-        error instanceof Error && error.message.startsWith("Empty ");
-      if (!isContentError) {
-        this.circuitBreaker.recordFailure();
+        error instanceof Error && (error.name === "ContentSkippedError" || error.message.startsWith("Empty "));
+      if (isContentError) {
+        // Log as DEBUG, do not emit chunkFailed, just mark processed and return
+        logger.debug("Chunk skipped due to content rules", {
+          chunkId: chunk.chunkId,
+          reason: errorMessage,
+        });
+        
+        // Ensure in-flight is decremented
+        this.queue.markProcessed(chunk.chunkId);
+        return;
       }
+
+      this.circuitBreaker.recordFailure();
 
       // Emit failure result
       const pipelineResult: PipelineResult = {
@@ -641,7 +663,7 @@ export class TranslationPipeline extends EventEmitter {
         chunkId: chunk.chunkId,
         provider: this.sttProvider!.name,
       });
-      throw new Error("Empty transcription result");
+      throw new ContentSkippedError("Empty transcription result");
     }
 
     // Filter non-speech artifacts and filler-only transcriptions
@@ -650,7 +672,7 @@ export class TranslationPipeline extends EventEmitter {
         chunkId: chunk.chunkId,
         transcription,
       });
-      throw new Error("Empty transcription result");
+      throw new ContentSkippedError("Skipped non-speech/filler transcription");
     }
 
     // Step 1.5: Audio Overlap Deduplication
@@ -692,7 +714,7 @@ export class TranslationPipeline extends EventEmitter {
           chunkId: chunk.chunkId,
           speakerId: speakerKey
         });
-        throw new Error("Empty transcription result");
+        throw new ContentSkippedError("Transcription fully deduplicated by time-based dedup");
       }
 
       finalTranscription = validWords.join("");
@@ -724,7 +746,7 @@ export class TranslationPipeline extends EventEmitter {
           mapped,
           targetLanguage: this.config.targetLanguage,
         });
-        throw new Error("Empty transcription result");
+        throw new ContentSkippedError("Detected language matches target, skipping translation");
       }
     }
 
@@ -763,12 +785,16 @@ export class TranslationPipeline extends EventEmitter {
         chunkId: chunk.chunkId,
         speakerId: speakerKey,
       });
-      throw new Error("Empty transcription result");
+      throw new ContentSkippedError("Transcription fully deduplicated by text-level dedup");
     }
 
     // Step 1.7: Text-Level Sentence Buffering
-    // Wait for complete sentences before translating
-    const sentences = this.textSegmenter.process(finalTranscription, speakerKey);
+    // Wait for complete sentences before translating.
+    // If the chunk was cut due to silence (isSilenceCut), we MUST flush whatever 
+    // is in the buffer because the speaker paused.
+    const forceFlush = chunk.isSilenceCut;
+    const sentences = this.textSegmenter.process(finalTranscription, speakerKey, forceFlush);
+    
     if (sentences.length === 0) {
       // Store the tail even when buffering, so the next chunk's dedup has context
       this.speakerLastTranscriptionTail.set(
@@ -780,7 +806,7 @@ export class TranslationPipeline extends EventEmitter {
         speakerId: speakerKey,
         fragment: finalTranscription,
       });
-      throw new Error("Empty transcription result");
+      throw new ContentSkippedError("Buffering incomplete fragment");
     }
 
     // Use the complete sentences for translation
@@ -1020,7 +1046,7 @@ export class TranslationPipeline extends EventEmitter {
         chunkId: chunk.chunkId,
         rawAsrResult: sttResult.asrResult,
       });
-      throw new Error("Empty transcription result");
+      throw new ContentSkippedError("Empty transcription result");
     }
 
     // Filter non-speech artifacts and filler-only transcriptions
@@ -1029,7 +1055,7 @@ export class TranslationPipeline extends EventEmitter {
         chunkId: chunk.chunkId,
         transcription,
       });
-      throw new Error("Empty transcription result");
+      throw new ContentSkippedError("Skipped non-speech/filler transcription");
     }
 
     logger.debug("STT completed", {

@@ -106,6 +106,9 @@ export class AudioBridge {
 
     logger.info("Starting AudioBridge");
 
+    // Initialize aggregator (loads Silero VAD)
+    await this.aggregator.initialize();
+
     // Ensure debug directory exists
     if (this.config.debugMode) {
       await this.ensureDebugDirectory();
@@ -114,8 +117,8 @@ export class AudioBridge {
     // Expose the callback function to the browser
     await this.page.exposeFunction(
       this.CALLBACK_NAME,
-      (frame: BrowserAudioFrame) => {
-        this.handleBrowserFrame(frame);
+      async (frame: BrowserAudioFrame) => {
+        await this.handleBrowserFrame(frame);
       },
     );
 
@@ -165,33 +168,31 @@ export class AudioBridge {
   }
 
   /**
-   * Handles an audio frame received from the browser.
+   * Handles an incoming audio frame from the browser.
    */
-  private handleBrowserFrame(frame: BrowserAudioFrame): void {
+  private async handleBrowserFrame(frame: BrowserAudioFrame): Promise<void> {
+    if (!this.isRunning) return;
+
     this.framesReceived++;
 
-    // Log first frame received
-    if (this.framesReceived === 1) {
-      logger.info("🎤 First audio frame received from browser!", {
-        rms: frame.rms.toFixed(4),
+    try {
+      // Convert to Float32Array (Puppeteer serialization gives us an object)
+      const samplesArray = Object.values(frame.samples) as number[];
+      const samples = new Float32Array(samplesArray);
+
+      // Create AudioFrame for aggregator
+      const audioFrame: AudioFrame = {
+        samples,
+        timestamp: frame.timestamp,
         isSpeech: frame.isSpeech,
-        sampleCount: frame.samples.length,
-      });
+        rms: frame.rms,
+      };
+
+      // Send to aggregator for chunking
+      await this.aggregator.processFrame(audioFrame);
+    } catch (e) {
+      logger.error("Error processing browser frame", { error: (e as Error).message });
     }
-
-    // Convert samples array back to Float32Array
-    const samples = new Float32Array(frame.samples);
-
-    // Create AudioFrame for aggregator
-    const audioFrame: AudioFrame = {
-      samples,
-      timestamp: frame.timestamp,
-      isSpeech: frame.isSpeech,
-      rms: frame.rms,
-    };
-
-    // Send to aggregator for chunking
-    this.aggregator.processFrame(audioFrame);
 
     // Log periodically (every ~21 seconds at 48kHz/128 samples)
     if (this.framesReceived % 1000 === 0) {

@@ -2,7 +2,7 @@
  * ElevenLabs Module Exports
  */
 
-export { ElevenLabsSTT } from "./ElevenLabsSTT";
+export { ElevenLabsRealtimeSTT } from "./ElevenLabsRealtimeSTT";
 export { ElevenLabsTTS } from "./ElevenLabsTTS";
 export {
   ElevenLabsConfig,

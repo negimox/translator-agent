@@ -203,7 +203,7 @@ export class AudioManager {
         const audio = (window as any).__translatorAudio;
 
         // Step 1: Create AudioContext
-        audio.audioContext = new AudioContext({ sampleRate: 48000 });
+        audio.audioContext = new AudioContext({ sampleRate: 16000 });
         console.log(
           "[AudioManager] AudioContext created, state:",
           audio.audioContext.state,

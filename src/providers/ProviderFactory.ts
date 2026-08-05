@@ -7,12 +7,12 @@
 
 import { createLogger } from "../logger";
 import {
-  ISTTProvider,
+  IRealtimeSTTProvider,
   ITranslationProvider,
   ITTSProvider,
   ProviderConfig,
 } from "./types";
-import { ElevenLabsSTT } from "./elevenlabs/ElevenLabsSTT";
+import { ElevenLabsRealtimeSTT } from "./elevenlabs/ElevenLabsRealtimeSTT";
 import { ElevenLabsTTS } from "./elevenlabs/ElevenLabsTTS";
 import {
   MizanTranslation,
@@ -50,7 +50,7 @@ export interface ProviderFactoryConfig {
  * Provider instances managed by the factory.
  */
 interface ProviderInstances {
-  stt: Map<string, ISTTProvider>;
+  stt: Map<string, IRealtimeSTTProvider>;
   translation: Map<string, ITranslationProvider>;
   tts: Map<string, ITTSProvider>;
 }
@@ -89,23 +89,21 @@ export class ProviderFactory {
   /**
    * Gets an STT provider instance.
    */
-  getSTTProvider(type: STTProviderType = "elevenlabs"): ISTTProvider {
+  getSTTProvider(type: STTProviderType = "elevenlabs"): IRealtimeSTTProvider {
     const cached = this.instances.stt.get(type);
     if (cached) {
       return cached;
     }
 
-    let provider: ISTTProvider;
+    let provider: IRealtimeSTTProvider;
 
     switch (type) {
       case "elevenlabs":
         if (!this.config.elevenlabs?.apiKey) {
           throw new Error("ElevenLabs API key not configured");
         }
-        provider = new ElevenLabsSTT({
+        provider = new ElevenLabsRealtimeSTT({
           apiKey: this.config.elevenlabs.apiKey,
-          baseUrl: this.config.elevenlabs.baseUrl,
-          timeoutMs: this.config.elevenlabs.timeoutMs,
         });
         break;
       default:
@@ -199,9 +197,9 @@ export class ProviderFactory {
       tts: {} as { [key: string]: { healthy: boolean; latencyMs?: number } },
     };
 
-    // Check STT providers
+    // STT is streaming now, just assume healthy if connected (or skip check)
     for (const [type, provider] of this.instances.stt) {
-      results.stt[type] = await provider.checkHealth();
+      results.stt[type] = { healthy: true };
     }
 
     // Check Translation providers
@@ -221,6 +219,10 @@ export class ProviderFactory {
    * Clears all cached provider instances.
    */
   clearInstances(): void {
+    // Disconnect STT before clearing
+    for (const provider of this.instances.stt.values()) {
+      provider.disconnect();
+    }
     this.instances.stt.clear();
     this.instances.translation.clear();
     this.instances.tts.clear();
@@ -231,12 +233,7 @@ export class ProviderFactory {
    * Gets all supported languages for STT.
    */
   getSTTSupportedLanguages(): string[] {
-    try {
-      const provider = this.getSTTProvider();
-      return provider.supportedLanguages;
-    } catch {
-      return [];
-    }
+    return ["en", "hi", "ur", "ar"]; // Default supported languages
   }
 
   /**

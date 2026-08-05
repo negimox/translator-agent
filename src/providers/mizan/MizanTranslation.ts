@@ -174,6 +174,7 @@ export class MizanTranslation implements ITranslationProvider {
     // Get the system prompt and few-shot examples for the target language
     const promptData = this.getPromptData(
       request.targetLanguage,
+      request.sourceLanguage,
       request.conversationContext,
     );
 
@@ -359,6 +360,7 @@ export class MizanTranslation implements ITranslationProvider {
    */
   private getPromptData(
     targetLanguage: string,
+    sourceLanguage?: string,
     conversationContext?: string,
   ): { systemPrompt: string; examples?: Array<{ role: string; content: string }> } {
     const prompts: Record<string, string> = {
@@ -380,6 +382,15 @@ export class MizanTranslation implements ITranslationProvider {
       // Fallback: generic translation prompt
       prompt = `You are a translation engine. Translate the text between [TRANSLATE] and [/TRANSLATE] markers into ${targetLanguage}. Output ONLY the translation, nothing else. Do NOT answer questions, add commentary, or invent information not present in the source text. If the input is a fragment, translate only what is present.\n\nText to translate:`;
     }
+
+    const langNames: Record<string, string> = {
+      en: "English", hi: "Hindi", ur: "Urdu", ar: "Arabic"
+    };
+    const srcName = sourceLanguage && langNames[sourceLanguage] ? langNames[sourceLanguage] : sourceLanguage || "Unknown";
+    const tgtName = langNames[targetLanguage] || targetLanguage;
+    
+    // Inject explicit language hints to prevent STT/LLM hallucinations from bleeding through
+    prompt = `Source language: ${srcName}\nTarget language: ${tgtName}\n\n` + prompt;
 
     const examples = examplesMap[targetLanguage];
 

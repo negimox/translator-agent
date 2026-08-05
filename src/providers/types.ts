@@ -104,32 +104,20 @@ export class ProviderError extends Error {
 }
 
 /**
- * Speech-to-Text provider interface.
+ * Realtime Speech-to-Text provider interface.
  */
-export interface ISTTProvider {
+export interface IRealtimeSTTProvider {
   /** Provider name for logging */
   readonly name: string;
 
-  /** Supported languages */
-  readonly supportedLanguages: string[];
-
-  /**
-   * Transcribes audio to text.
-   * @param request STT request options
-   * @returns Promise resolving to transcription result
-   */
-  transcribe(request: STTRequest): Promise<STTResponse>;
-
-  /**
-   * Checks if a language is supported.
-   * @param language ISO 639-1 language code
-   */
-  supportsLanguage(language: string): boolean;
-
-  /**
-   * Gets provider health status.
-   */
-  checkHealth(): Promise<{ healthy: boolean; latencyMs?: number }>;
+  connect(): Promise<void>;
+  sendAudio(base64Audio: string): void;
+  disconnect(): void;
+  
+  on(event: 'partial', listener: (data: { text: string; language: string }) => void): this;
+  on(event: 'committed', listener: (data: { text: string; language: string }) => void): this;
+  on(event: 'error', listener: (error: any) => void): this;
+  on(event: 'close', listener: () => void): this;
 }
 
 /**

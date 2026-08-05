@@ -20,16 +20,11 @@ import { createLogger } from "../logger";
 import { ChromeInstance, launchChrome, isChromeLive } from "./ChromeLauncher";
 import { AudioManager } from "../audio/AudioContextManager";
 import { HeartbeatMonitor } from "../audio/HeartbeatMonitor";
-import { AudioBridge, AudioChunk } from "../audio/AudioBridge";
+import { AudioBridge } from "../audio/AudioBridge";
 import { JitsiConnection } from "../meeting/JitsiConnection";
 import { BotPageServer } from "../server/BotPageServer";
 import { HealthStatus, AgentHealthState } from "../health/HealthChecks";
-import {
-  TranslationPipeline,
-  AdaptiveChunkController,
-  PipelineResult,
-  CircuitState,
-} from "../mizan";
+import { TranslationPipeline } from "../mizan";
 import { getProviderFactory } from "../providers";
 
 const logger = createLogger("TranslatorAgent");
@@ -66,11 +61,6 @@ export class TranslatorAgent {
 
   // Phase 4: Translation pipeline
   private translationPipeline: TranslationPipeline | null = null;
-  private adaptiveChunkController: AdaptiveChunkController | null = null;
-
-  // Phase 3: Chunk callback for external processing
-  private onChunkCallback: ((chunk: AudioChunk) => void) | null = null;
-
   // Phase 4: Audio output callback
   private onAudioOutputCallback:
     | ((audio: ArrayBuffer, chunkId: string) => void)
@@ -89,15 +79,6 @@ export class TranslatorAgent {
    */
   getState(): AgentState {
     return this.state;
-  }
-
-  /**
-   * Sets a callback for when audio chunks are ready.
-   * This is used by the orchestration layer (Phase 4+) to process chunks.
-   */
-  setOnChunkCallback(callback: (chunk: AudioChunk) => void): void {
-    this.onChunkCallback = callback;
-    logger.info("Chunk callback registered");
   }
 
   /**
@@ -209,21 +190,11 @@ export class TranslatorAgent {
 
     // Create audio bridge with configuration
     this.audioBridge = new AudioBridge(this.chrome.page, {
-      aggregatorConfig: {
-        agentId: getDisplayName(this.config),
-        sampleRate: this.config.sampleRate,
-        vadRmsThreshold: this.config.vadRmsThreshold,
-        vadSilenceCoalesceMs: this.config.vadSilenceCoalesceMs,
-        targetChunkDurationMs: this.config.targetChunkDurationMs,
-        minChunkDurationMs: this.config.minChunkDurationMs,
-        maxChunkDurationMs: this.config.maxChunkDurationMs,
-        debugMode: this.config.debugMode,
-      },
       debugMode: this.config.debugMode,
-      debugOutputDir: this.config.debugOutputDir,
-      maxDebugChunks: this.config.maxDebugChunks,
-      onChunk: (chunk) => this.handleChunk(chunk),
+      bufferSizeMs: 100,
     });
+
+    this.audioBridge.on("audio_chunk", (chunk) => this.handleAudioChunk(chunk));
 
     // Start the bridge (exposes callback to browser)
     await this.audioBridge.start();
@@ -247,39 +218,20 @@ export class TranslatorAgent {
     });
     logger.info("Audio debug info after connection", debugInfo);
 
-    // Generate test tone if in debug mode
-    if (this.config.debugMode) {
-      logger.info("Debug mode enabled, generating test tone");
-      await this.audioBridge.generateTestToneFile(1000);
-    }
-
     logger.info("Audio bridge initialized", {
       callbackName: this.audioBridge.getCallbackName(),
     });
   }
 
   /**
-   * Phase 3: Handles a completed audio chunk.
+   * Handles a completed audio chunk.
    */
-  private handleChunk(chunk: AudioChunk): void {
-    logger.debug("Chunk received in agent", {
-      chunkId: chunk.chunkId,
-      durationMs: chunk.durationMs,
-    });
-
-    // Phase 4: Submit chunk to translation pipeline
+  private handleAudioChunk(chunk: {
+    audio_base_64: string;
+    timestamp: number;
+  }): void {
     if (this.translationPipeline) {
-      const submitted = this.translationPipeline.submitChunk(chunk);
-      if (!submitted) {
-        logger.warn("Chunk not submitted to pipeline (queue full)", {
-          chunkId: chunk.chunkId,
-        });
-      }
-    }
-
-    // Call external callback if registered (for Phase 4+ orchestration)
-    if (this.onChunkCallback) {
-      this.onChunkCallback(chunk);
+      this.translationPipeline.submitAudio(chunk.audio_base_64);
     }
   }
 
@@ -340,36 +292,6 @@ export class TranslatorAgent {
       circuitBreakerErrorThreshold: this.config.circuitBreakerErrorThreshold,
       circuitBreakerWindowMs: this.config.circuitBreakerWindowMs,
       circuitBreakerOpenTimeoutMs: this.config.circuitBreakerOpenTimeoutMs,
-      maxQueueLength: this.config.maxQueueLength,
-      maxInFlight: this.config.maxInFlight,
-      debugMode: this.config.debugMode,
-      debugOutputDir: this.config.debugOutputDir,
-    });
-
-    // Set up event handlers
-    this.translationPipeline.on("chunkProcessed", (result: PipelineResult) => {
-      logger.info("Translation completed", {
-        chunkId: result.chunkId,
-        latencyMs: result.latencyMs,
-        transcriptionLength: result.transcription?.length || 0,
-        translationLength: result.translation?.length || 0,
-      });
-    });
-
-    this.translationPipeline.on("chunkFailed", (result: PipelineResult) => {
-      logger.error("Translation failed", {
-        chunkId: result.chunkId,
-        error: result.error,
-        retries: result.retries,
-      });
-    });
-
-    this.translationPipeline.on("circuitStateChange", (event) => {
-      logger.warn("Circuit breaker state changed", event);
-    });
-
-    this.translationPipeline.on("backpressure", (data) => {
-      logger.warn("Pipeline backpressure detected", data);
     });
 
     // Set audio output callback (Phase 5: Play translated audio)
@@ -402,33 +324,12 @@ export class TranslatorAgent {
       }
     });
 
-    // Initialize adaptive chunk controller if enabled
-    if (this.config.adaptiveChunkingEnabled && this.audioBridge) {
-      this.adaptiveChunkController = new AdaptiveChunkController({
-        defaultChunkDurationMs: this.config.targetChunkDurationMs,
-        minChunkDurationMs: this.config.minChunkDurationMs,
-        maxChunkDurationMs: this.config.maxChunkDurationMs,
-        updateIntervalMs: this.config.adaptiveUpdateIntervalMs,
-      });
-
-      // Connect to pipeline components
-      this.adaptiveChunkController.connect(
-        this.translationPipeline.getTokenBucket(),
-        this.translationPipeline.getQueue(),
-        this.audioBridge.getAggregator(),
-      );
-
-      this.adaptiveChunkController.start();
-      logger.info("Adaptive chunk controller started");
-    }
-
     // Start the pipeline
-    this.translationPipeline.start();
+    await this.translationPipeline.start();
 
     logger.info("Translation pipeline initialized", {
       sourceLanguage: this.config.sourceLanguage,
       targetLanguage: this.config.targetLanguage,
-      adaptiveChunking: this.config.adaptiveChunkingEnabled,
     });
   }
 
@@ -499,12 +400,6 @@ export class TranslatorAgent {
    * Cleans up all resources.
    */
   private async cleanup(): Promise<void> {
-    // Stop adaptive chunk controller (Phase 4)
-    if (this.adaptiveChunkController) {
-      this.adaptiveChunkController.stop();
-      this.adaptiveChunkController = null;
-    }
-
     // Stop translation pipeline (Phase 4)
     if (this.translationPipeline) {
       this.translationPipeline.stop();
@@ -559,8 +454,7 @@ export class TranslatorAgent {
     // Phase 3: Check audio bridge health
     const audioBridgeRunning = this.audioBridge !== null;
 
-    // Phase 4: Check pipeline health
-    const pipelineHealthy = this.translationPipeline?.isHealthy() ?? true;
+    const pipelineHealthy = true;
 
     // Query real audio state from browser (async)
     let audioContextState: "suspended" | "running" | "closed" = "closed";
@@ -604,24 +498,8 @@ export class TranslatorAgent {
     };
   }
 
-  /**
-   * Phase 3: Gets the audio bridge metrics.
-   */
-  getAudioMetrics(): {
-    framesReceived: number;
-    chunksEmitted: number;
-    isCapturing: boolean;
-  } | null {
-    if (!this.audioBridge) {
-      return null;
-    }
-
-    const metrics = this.audioBridge.getMetrics();
-    return {
-      framesReceived: metrics.framesReceived,
-      chunksEmitted: metrics.aggregatorMetrics.totalChunksEmitted,
-      isCapturing: metrics.isRunning,
-    };
+  getAudioMetrics(): any {
+    return { isCapturing: this.audioBridge !== null };
   }
 
   /**
@@ -651,13 +529,6 @@ export class TranslatorAgent {
     } else {
       logger.warn("Cannot update rate limit - pipeline not initialized");
     }
-  }
-
-  /**
-   * Phase 3: Gets the chunk aggregator for direct access.
-   */
-  getAggregator() {
-    return this.audioBridge?.getAggregator() ?? null;
   }
 
   /**

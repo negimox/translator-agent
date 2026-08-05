@@ -6,7 +6,7 @@
 
 // Types
 export {
-  ISTTProvider,
+  IRealtimeSTTProvider,
   ITranslationProvider,
   ITTSProvider,
   STTRequest,
@@ -32,7 +32,7 @@ export {
 } from "./ProviderFactory";
 
 // ElevenLabs
-export { ElevenLabsSTT } from "./elevenlabs/ElevenLabsSTT";
+export { ElevenLabsRealtimeSTT } from "./elevenlabs/ElevenLabsRealtimeSTT";
 export { ElevenLabsTTS } from "./elevenlabs/ElevenLabsTTS";
 export {
   ElevenLabsConfig,

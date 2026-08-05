@@ -73,14 +73,14 @@ export const ELEVENLABS_VOICES: Record<string, VoiceConfig> = {
 
   // English - River (relaxed, calm, informative)
   en: {
-    voiceId: "SAz9YHcvj6GT2YYXdXww",
+    voiceId: "CwhRBWXzGAHq8TQ4Fs17",
     model: ELEVENLABS_MODELS.ELEVEN_FLASH_V2_5,
     verified: true,
-    name: "River",
-    gender: "neutral",
+    name: "Roger",
+    gender: "male",
   },
 
-  // Hindi - Reva (gentle, warm narration)
+  // Hindi
   hi: {
     voiceId: "UT6USLtoAlXHj5k4sOLY",
     model: ELEVENLABS_MODELS.ELEVEN_FLASH_V2_5,

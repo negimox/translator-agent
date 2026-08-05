@@ -104,52 +104,93 @@ export const EXAMPLES_HI = [
     role: "user",
     content: "[TRANSLATE] How are you feeling today? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating 'How are you feeling today?' to Hindi. </think>\n<translate>आपको आज कैसा लग रहा है?</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating 'How are you feeling today?' to Hindi. </think>\n<translate>आपको आज कैसा लग रहा है?</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] How's the weather there? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating 'How's the weather there?' to Hindi. </think>\n<translate>वहाँ का मौसम कैसा है?</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating 'How's the weather there?' to Hindi. </think>\n<translate>वहाँ का मौसम कैसा है?</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Is there any pain in your body? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating 'Is there any pain in your body?' to Hindi. </think>\n<translate>क्या आपके शरीर में कोई दर्द है?</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating 'Is there any pain in your body?' to Hindi. </think>\n<translate>क्या आपके शरीर में कोई दर्द है?</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Can you hear me? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating 'Can you hear me?' to Hindi. </think>\n<translate>क्या आप मुझे सुन सकते हैं?</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating 'Can you hear me?' to Hindi. </think>\n<translate>क्या आप मुझे सुन सकते हैं?</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Take Paracetamol twice a day. [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> 'Paracetamol' stays in English. 'twice a day' is 'दिन में 2 बार'. </think>\n<translate>Paracetamol दिन में 2 बार लें।</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> 'Paracetamol' stays in English. 'twice a day' is 'दिन में 2 बार'. </think>\n<translate>Paracetamol दिन में 2 बार लें।</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Okay, I'll advise you to take [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Fragment translation. 'Okay' -> 'ठीक है', 'I'll advise you to take' -> 'मैं आपको लेने की सलाह दूँगा'. Do not complete. </think>\n<translate>ठीक है, मैं आपको लेने की सलाह दूँगा</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Fragment translation. 'Okay' -> 'ठीक है', 'I'll advise you to take' -> 'मैं आपको लेने की सलाह दूँगा'. Do not complete. </think>\n<translate>ठीक है, मैं आपको लेने की सलाह दूँगा</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Okay, talk to you later [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Conversational pleasantry. 'Okay' -> 'ठीक है', 'talk to you later' -> 'बाद में बात करते हैं'. </think>\n<translate>ठीक है, बाद में बात करते हैं।</translate>" },
-  {
-    role: "user",
-    content: "[TRANSLATE] We need to check your BP and give you an injection. [/TRANSLATE]",
-  },
   {
     role: "assistant",
-    content: "<think> 'BP' and 'injection' stay in English. </think>\n<translate>हमें आपका BP check करना होगा और आपको injection देना होगा।</translate>",
+    content:
+      "<think> Conversational pleasantry. 'Okay' -> 'ठीक है', 'talk to you later' -> 'बाद में बात करते हैं'. </think>\n<translate>ठीक है, बाद में बात करते हैं।</translate>",
   },
   {
     role: "user",
-    content: "[TRANSLATE] Please tell me, is there any pain in your body? [/TRANSLATE]",
+    content:
+      "[TRANSLATE] We need to check your BP and give you an injection. [/TRANSLATE]",
   },
   {
     role: "assistant",
-    content: "<think> Translating polite request and question. </think>\n<translate>कृपया बताइए, क्या आपके शरीर में कोई दर्द है?</translate>",
+    content:
+      "<think> 'BP' and 'injection' stay in English. </think>\n<translate>हमें आपका BP check करना होगा और आपको injection देना होगा।</translate>",
+  },
+  {
+    role: "user",
+    content:
+      "[TRANSLATE] Please tell me, is there any pain in your body? [/TRANSLATE]",
+  },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating polite request and question. </think>\n<translate>कृपया बताइए, क्या आपके शरीर में कोई दर्द है?</translate>",
+  },
+  {
+    role: "user",
+    content: "[TRANSLATE] Okay then, let's end the meeting here. [/TRANSLATE]",
+  },
+  {
+    role: "assistant",
+    content:
+      "<think> 'meeting' is a common English loanword and MUST stay in Latin script exactly as written. </think>\n<translate>ठीक है, तो हम यहाँ meeting समाप्त करते हैं।</translate>",
   },
 ];
 
@@ -184,27 +225,47 @@ export const EXAMPLES_UR = [
     role: "user",
     content: "[TRANSLATE] How are you feeling today? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating to Urdu. </think>\n<translate>آپ کو آج کیسا لگ رہا ہے؟</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating to Urdu. </think>\n<translate>آپ کو آج کیسا لگ رہا ہے؟</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Is your stomach paining? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating to Urdu. </think>\n<translate>کیا آپ کے پیٹ میں درد ہو رہا ہے؟</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating to Urdu. </think>\n<translate>کیا آپ کے پیٹ میں درد ہو رہا ہے؟</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] The infection is spreading quickly. [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> 'Infection' stays in English. </think>\n<translate>Infection تیزی سے پھیل رہا ہے۔</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> 'Infection' stays in English. </think>\n<translate>Infection تیزی سے پھیل رہا ہے۔</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] We will end the meeting now. [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> 'meeting' stays in English. </think>\n<translate>ہم اب meeting ختم کریں گے۔</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> 'meeting' is an English loanword and MUST stay in Latin script. </think>\n<translate>ہم اب meeting ختم کریں گے۔</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Okay, talk to you later [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Conversational pleasantry. </think>\n<translate>ٹھیک ہے، بعد میں بات کرتے ہیں۔</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Conversational pleasantry. </think>\n<translate>ٹھیک ہے، بعد میں بات کرتے ہیں۔</translate>",
+  },
 ];
 
 /**
@@ -253,45 +314,90 @@ export const EXAMPLES_AR = [
     role: "user",
     content: "[TRANSLATE] How are you feeling today? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating to Arabic. </think>\n<translate>كيف تشعر اليوم؟</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating to Arabic. </think>\n<translate>كيف تشعر اليوم؟</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Is there any pain in your stomach? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating to Arabic. </think>\n<translate>هل يوجد ألم في بطنك؟</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating to Arabic. </think>\n<translate>هل يوجد ألم في بطنك؟</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] How's the weather there? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating to Arabic. </think>\n<translate>كيف الطقس عندكم؟</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating to Arabic. </think>\n<translate>كيف الطقس عندكم؟</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Can you hear me? [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating to Arabic. </think>\n<translate>هل تسمعني؟</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating to Arabic. </think>\n<translate>هل تسمعني؟</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Take Paracetamol twice a day. [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> 'Paracetamol' stays in English. </think>\n<translate>خذ Paracetamol مرتين في اليوم.</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> 'Paracetamol' stays in English. </think>\n<translate>خذ Paracetamol مرتين في اليوم.</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] मुझे बुखार है और सिर में दर्द है। [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating Hindi to Arabic. </think>\n<translate>عندي حمى وألم في الرأس.</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating Hindi to Arabic. </think>\n<translate>عندي حمى وألم في الرأس.</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] آپ کو آج کیسا لگ رہا ہے؟ [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating Urdu to Arabic. </think>\n<translate>كيف تشعر اليوم؟</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating Urdu to Arabic. </think>\n<translate>كيف تشعر اليوم؟</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Okay, I'll advise you to take [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Translating fragment. Do not complete. </think>\n<translate>حسنا، سأنصحك بأن تأخذ</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Translating fragment. Do not complete. </think>\n<translate>حسنا، سأنصحك بأن تأخذ</translate>",
+  },
   {
     role: "user",
     content: "[TRANSLATE] Okay, talk to you later [/TRANSLATE]",
   },
-  { role: "assistant", content: "<think> Conversational pleasantry. </think>\n<translate>حسناً، سأتحدث إليك لاحقاً.</translate>" },
+  {
+    role: "assistant",
+    content:
+      "<think> Conversational pleasantry. </think>\n<translate>حسناً، سأتحدث إليك لاحقاً.</translate>",
+  },
+  {
+    role: "user",
+    content: "[TRANSLATE] Let's end the meeting here. [/TRANSLATE]",
+  },
+  {
+    role: "assistant",
+    content:
+      "<think> 'meeting' is an English loanword and MUST stay in Latin script. </think>\n<translate>دعونا ننهي الـ meeting هنا.</translate>",
+  },
 ];

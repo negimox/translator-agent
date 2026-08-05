@@ -1,13 +1,23 @@
 import { createLogger } from "../logger";
+import { mergePartialBuffer, trimBuffer } from "./TextDedup";
 
 const logger = createLogger("TextSegmenter");
 
 /**
+ * Maximum character length for a speaker's pending text buffer.
+ * Prevents unbounded growth if all dedup safety nets fail.
+ */
+const MAX_BUFFER_CHARS = 600;
+
+/**
  * Text Segmenter for Translation Pipeline.
- * 
- * Replaces brittle audio-silence chunking with robust text-level segmentation.
- * Accumulates incoming transcription streams per speaker and splits them strictly 
+ *
+ * Accumulates incoming transcription streams per speaker and splits them strictly
  * on terminal punctuation boundaries.
+ *
+ * Key improvement over the original: uses mergePartialBuffer() instead of blind
+ * concatenation, so re-transcribed overlap words from the previous chunk are
+ * detected and stripped before being added to the buffer.
  */
 export class TextSegmenter {
   // Pending buffers per speaker: Map<speakerId, string>
@@ -19,7 +29,11 @@ export class TextSegmenter {
   /**
    * Processes incoming text, returning any complete sentences.
    * Trailing incomplete fragments are buffered for the next call.
-   * 
+   *
+   * Uses overlap-aware merging: if incoming text re-transcribes words already
+   * buffered (due to audio chunk overlap), they are detected and deduplicated
+   * before appending — preventing the cascading duplication bug.
+   *
    * @param text The new transcription text
    * @param speakerId The speaker identifier
    * @param forceFlush If true, forces the buffer to flush even if incomplete
@@ -31,14 +45,21 @@ export class TextSegmenter {
     }
 
     let buffer = this.buffers.get(speakerId) || "";
-    
-    // Normalize spacing when appending
-    if (buffer && text && !buffer.endsWith(" ") && !text.startsWith(" ")) {
-      buffer += " " + text;
-    } else {
-      buffer += text;
+
+    if (text) {
+      if (buffer) {
+        // Use overlap-aware merge instead of blind concatenation.
+        // mergePartialBuffer detects if `text` re-transcribes content already
+        // in the buffer and splices it in cleanly instead of duplicating.
+        buffer = mergePartialBuffer(buffer, text);
+      } else {
+        buffer = text.trim();
+      }
+
+      // Safety cap: prevent unbounded buffer growth
+      buffer = trimBuffer(buffer, MAX_BUFFER_CHARS);
     }
-    
+
     // Trim leading whitespace
     buffer = buffer.trimStart();
 
@@ -52,11 +73,9 @@ export class TextSegmenter {
       return [buffer.trim()];
     }
 
-    // Split logic modeled after live-translation's split_complete_sentences
-    // We look for the LAST terminal punctuation to slice the buffer.
+    // Split logic: find the LAST terminal punctuation to slice the buffer.
     const sentences: string[] = [];
-    
-    // Find all indices of terminal punctuation
+
     let lastTerminalIndex = -1;
     for (let i = buffer.length - 1; i >= 0; i--) {
       if (this.terminalPunctuation.test(buffer[i])) {
@@ -76,8 +95,6 @@ export class TextSegmenter {
     const remainingText = buffer.slice(lastTerminalIndex + 1).trimStart();
 
     if (completeText) {
-      // We can optionally split by sentence here, but LLMs translate paragraphs well.
-      // We'll just return the entire block of complete sentences as a single item.
       sentences.push(completeText);
     }
 
@@ -87,7 +104,7 @@ export class TextSegmenter {
       logger.debug("Segmented complete sentences", {
         speakerId,
         sentences,
-        remainingBuffered: remainingText
+        remainingBuffered: remainingText,
       });
     }
 

@@ -45,6 +45,7 @@ import {
   ConversationContextConfig,
 } from "./ConversationContext";
 import { TextSegmenter } from "./TextSegmenter";
+import { mergeOverlapText } from "./TextDedup";
 import {
   ISTTProvider,
   ITranslationProvider,
@@ -212,6 +213,10 @@ export class TranslationPipeline extends EventEmitter {
   // Deduplication state for audio overlapping
   private speakerCommittedUntil: Map<string, number> = new Map();
 
+  // Text-level dedup: store the tail of the last committed transcription per
+  // speaker. Used by mergeOverlapText() to strip overlap words from the next chunk.
+  private speakerLastTranscriptionTail: Map<string, string> = new Map();
+
   // Metrics
   private totalChunksReceived: number = 0;
   private totalChunksProcessed: number = 0;
@@ -368,9 +373,11 @@ export class TranslationPipeline extends EventEmitter {
     // Clear remaining queue
     this.queue.clear();
 
-    // Reset conversation context and segmenter
+    // Reset conversation context, segmenter, and dedup state
     this.conversationContext.reset();
     this.textSegmenter.clearAll();
+    this.speakerCommittedUntil.clear();
+    this.speakerLastTranscriptionTail.clear();
 
     logger.info("TranslationPipeline stopped", {
       processed: this.totalChunksProcessed,
@@ -718,20 +725,60 @@ export class TranslationPipeline extends EventEmitter {
       detectedLanguage: sttResult.detectedLanguage,
     });
 
-    // Step 1.6: Text-Level Sentence Buffering
-    // Wait for complete sentences before translating
-    const sentences = this.textSegmenter.process(finalTranscription, speakerKey);
-    if (sentences.length === 0) {
-      logger.debug("Buffering incomplete fragment", {
+    // Step 1.6: Text-Level Overlap Deduplication (primary safety layer)
+    // mergeOverlapText() strips words from finalTranscription that were already
+    // present at the tail of the previous chunk's transcription. This works even
+    // when time-based word dedup fails (timestamp domain mismatch, missing timestamps)
+    // because it operates on the text itself rather than audio timestamps.
+    const previousTail = this.speakerLastTranscriptionTail.get(speakerKey) || "";
+    if (previousTail) {
+      const deduped = mergeOverlapText(previousTail, finalTranscription);
+      if (deduped !== finalTranscription) {
+        logger.debug("Text-level overlap dedup applied", {
+          chunkId: chunk.chunkId,
+          original: finalTranscription.substring(0, 80),
+          deduped: deduped.substring(0, 80),
+          tailUsed: previousTail.substring(0, 60),
+        });
+        finalTranscription = deduped;
+      }
+    }
+
+    // Guard: if text-level dedup emptied the transcription, skip this chunk
+    if (!finalTranscription.trim()) {
+      logger.debug("Transcription fully deduplicated by text-level dedup", {
         chunkId: chunk.chunkId,
         speakerId: speakerKey,
-        fragment: finalTranscription
       });
       throw new Error("Empty transcription result");
     }
-    
+
+    // Step 1.7: Text-Level Sentence Buffering
+    // Wait for complete sentences before translating
+    const sentences = this.textSegmenter.process(finalTranscription, speakerKey);
+    if (sentences.length === 0) {
+      // Store the tail even when buffering, so the next chunk's dedup has context
+      this.speakerLastTranscriptionTail.set(
+        speakerKey,
+        finalTranscription.slice(-200),
+      );
+      logger.debug("Buffering incomplete fragment", {
+        chunkId: chunk.chunkId,
+        speakerId: speakerKey,
+        fragment: finalTranscription,
+      });
+      throw new Error("Empty transcription result");
+    }
+
     // Use the complete sentences for translation
     finalTranscription = sentences.join(" ");
+
+    // Update the transcription tail AFTER sentence extraction so it tracks
+    // the last COMMITTED content (not the incomplete fragment in the buffer).
+    this.speakerLastTranscriptionTail.set(
+      speakerKey,
+      finalTranscription.slice(-200),
+    );
 
     // Step 2: Translation (Mizan) — with conversation context
     const conversationContext = this.conversationContext.getContextBlock();

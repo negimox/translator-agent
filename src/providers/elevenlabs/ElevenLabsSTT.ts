@@ -34,6 +34,8 @@ interface ElevenLabsSTTResponse {
     start: number;
     end: number;
     confidence: number;
+    type?: "word" | "spacing" | "audio_event"; // ElevenLabs token type
+    speaker_id?: string;
   }>;
 }
 
@@ -89,6 +91,10 @@ export class ElevenLabsSTT implements ISTTProvider {
     // Scribe to force-transcribe non-English speech as English, producing
     // garbled output. Auto-detection is more accurate for this use case.
 
+    // Explicitly request word-level timestamps (this is the default, but we set it
+    // defensively so the deduplication logic in TranslationPipeline always has timestamps).
+    formData.append("timestamps_granularity", "word");
+
     // Remove filler words (Yeah, Um, Uh) and false starts at model level
     // This produces cleaner text for the translation LLM
     formData.append("remove_disfluencies", "true");
@@ -134,12 +140,21 @@ export class ElevenLabsSTT implements ISTTProvider {
         confidence: data.language_probability,
       });
 
+      // Filter words array to only include actual spoken word tokens.
+      // ElevenLabs returns 3 token types: "word" (spoken), "spacing" (whitespace),
+      // and "audio_event" (laughter, etc). Only "word" tokens have meaningful
+      // start/end timestamps for deduplication; spacing tokens have near-zero
+      // duration and pollute the committed-until boundary calculation.
+      const spokenWords = (data.words || []).filter(
+        (w) => !w.type || w.type === "word"
+      );
+
       return {
         text: data.text || "",
         detectedLanguage: data.language_code,
         confidence: data.language_probability,
         metadata: {
-          words: data.words,
+          words: spokenWords,
           provider: this.name,
           latencyMs,
         },

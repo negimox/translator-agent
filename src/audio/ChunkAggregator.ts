@@ -36,7 +36,7 @@ export interface ChunkAggregatorConfig {
   targetChunkDurationMs: number; // Soft ceiling for chunk size (3000ms default)
   minChunkDurationMs: number; // Minimum chunk to send: 800ms
   maxChunkDurationMs: number; // Safety cap for continuous speech: 5000ms
-  chunkOverlapMs: number; // Overlap with previous chunk to prevent mid-word cuts
+  chunkOverlapMs: number; // Overlap tail for MID-SPEECH forced cuts ONLY (not clean VAD cuts)
 
   // Adaptive chunking (mechanism built in Phase 3, logic in Phase 4)
   adaptiveChunkingEnabled: boolean;
@@ -56,7 +56,7 @@ export const DEFAULT_CHUNK_CONFIG: ChunkAggregatorConfig = {
   targetChunkDurationMs: 3000, // 3s target — soft ceiling for chunk size
   minChunkDurationMs: 800, // Allow natural short utterances ("yes", "okay thank you")
   maxChunkDurationMs: 5000, // Max 5 seconds — safety cap for continuous speech
-  chunkOverlapMs: 1500, // 1.5s overlap to ensure words aren't cut at chunk boundaries
+  chunkOverlapMs: 750, // 0.75s overlap — only used on forced mid-speech cuts (matches live-translation default)
   adaptiveChunkingEnabled: false, // Disabled until Phase 4
   debugMode: false,
 };
@@ -96,7 +96,8 @@ interface AggregatorState {
   silenceDurationMs: number;
   collectedSamples: Float32Array[];
   totalSamplesCollected: number;
-  previousChunkTail: Float32Array; // Stored overlap from previous chunk
+  previousChunkTail: Float32Array; // Stored overlap from previous chunk (only from forced cuts)
+  wasForcedCut: boolean; // Whether the previous chunk was a forced mid-speech cut
 }
 
 /**
@@ -140,6 +141,7 @@ export class ChunkAggregator extends EventEmitter {
       collectedSamples: [],
       totalSamplesCollected: 0,
       previousChunkTail: new Float32Array(0),
+      wasForcedCut: false,
     };
   }
 
@@ -239,13 +241,16 @@ export class ChunkAggregator extends EventEmitter {
 
     // Emit conditions (priority order):
     // 1. PRIMARY: VAD silence exceeded coalesce window AND chunk meets minimum duration
-    //    → This is the natural speech boundary detector. Emits as soon as the speaker
-    //      pauses, preventing mid-word/mid-sentence splits.
+    //    → This is the natural speech boundary detector ("clean cut"). Emits as soon
+    //      as the speaker pauses, preventing mid-word/mid-sentence splits.
+    //    → On clean cuts, NO overlap tail is stored; the next chunk starts fresh.
     // 2. SAFETY: Absolute hard cap of 15 seconds (force emit for continuous speakers)
     //    → Prevents unbounded buffering and memory bloat when someone talks without pausing.
+    //    → This is a "forced cut" — an overlap tail IS stored so the straddling word
+    //      isn't lost. The next chunk's STT will re-transcribe the tail, and text-level
+    //      dedup (mergeOverlapText) will strip the duplicate words.
     //
-    // NOTE: targetChunkDurationMs and maxChunkDurationMs are treated as soft targets,
-    // they guide rate limiting but we still wait for a natural speech boundary.
+    // This matches live-translation's overlap_tail_start() conditional behavior.
 
     const silenceExceeded =
       this.state.silenceDurationMs > this.config.vadSilenceCoalesceMs;
@@ -253,20 +258,22 @@ export class ChunkAggregator extends EventEmitter {
       collectionDurationMs >= this.config.minChunkDurationMs;
     const reachedHardMax = collectionDurationMs >= 15000; // 15 seconds absolute safety cap
 
-    const shouldEmit =
-      hasSpeech &&
-      ((silenceExceeded && meetsMinDuration) || // Natural speech boundary
-        reachedHardMax); // Absolute safety cap for continuous speech
+    const isCleanCut = silenceExceeded && meetsMinDuration;
+    const isForcedCut = reachedHardMax;
+    const shouldEmit = hasSpeech && (isCleanCut || isForcedCut);
 
     if (shouldEmit) {
-      this.emitChunk();
+      this.emitChunk(isCleanCut);
     }
   }
 
   /**
    * Emits the current collected audio as a chunk.
+   * @param isCleanCut - True when emission is triggered by a natural VAD silence boundary.
+   *   Clean cuts start the next chunk fresh (no overlap). Forced cuts (hard cap hit)
+   *   store an overlap tail so words straddling the boundary aren't lost.
    */
-  private emitChunk(): void {
+  private emitChunk(isCleanCut: boolean = true): void {
     if (this.state.collectedSamples.length === 0) {
       this.resetState();
       return;
@@ -327,21 +334,33 @@ export class ChunkAggregator extends EventEmitter {
     // Emit event for consumers
     this.emit("chunk", chunk);
 
-    // Extract the tail for the NEXT chunk's overlap BEFORE resetting state
-    // We want the last chunkOverlapMs of audio
-    const overlapSamplesNeeded = Math.floor(
-      (this.config.chunkOverlapMs / 1000) * this.config.sampleRate
-    );
+    // Extract the tail for the NEXT chunk's overlap BEFORE resetting state.
+    //
+    // KEY BEHAVIOR (mirrors live-translation's overlap_tail_start()):
+    // - Clean VAD cut: no overlap tail — the next chunk starts fresh. The speaker
+    //   paused at a natural boundary so there's no risk of cutting mid-word.
+    // - Forced mid-speech cut (hard cap): store a tail so the word straddling
+    //   the boundary is re-transcribed and caught by text-level dedup.
     let nextChunkTail = new Float32Array(0);
-    
-    if (mergedSamples.length > overlapSamplesNeeded) {
-      nextChunkTail = mergedSamples.slice(mergedSamples.length - overlapSamplesNeeded);
+
+    if (!isCleanCut) {
+      const overlapSamplesNeeded = Math.floor(
+        (this.config.chunkOverlapMs / 1000) * this.config.sampleRate
+      );
+      if (mergedSamples.length > overlapSamplesNeeded) {
+        nextChunkTail = mergedSamples.slice(mergedSamples.length - overlapSamplesNeeded);
+      } else {
+        nextChunkTail = mergedSamples.slice();
+      }
+      logger.debug("Overlap tail stored (forced mid-speech cut)", {
+        tailMs: (nextChunkTail.length / this.config.sampleRate * 1000).toFixed(0),
+      });
     } else {
-      nextChunkTail = mergedSamples.slice();
+      logger.debug("No overlap tail (clean VAD cut) — next chunk starts fresh");
     }
 
-    // Reset state for next chunk, preserving the tail
-    this.resetState(nextChunkTail);
+    // Reset state for next chunk, preserving the tail (empty for clean cuts)
+    this.resetState(nextChunkTail, !isCleanCut);
   }
 
   /**
@@ -373,11 +392,16 @@ export class ChunkAggregator extends EventEmitter {
 
   /**
    * Resets the aggregator state for next collection.
-   * @param previousChunkTail Optional overlap to carry over to the next chunk
+   * @param previousChunkTail Overlap audio to carry over (only for forced cuts)
+   * @param wasForcedCut Whether the previous chunk was a forced mid-speech cut
    */
-  private resetState(previousChunkTail: Float32Array = new Float32Array(0)): void {
+  private resetState(
+    previousChunkTail: Float32Array = new Float32Array(0),
+    wasForcedCut: boolean = false,
+  ): void {
     this.state = this.createInitialState();
     this.state.previousChunkTail = previousChunkTail;
+    this.state.wasForcedCut = wasForcedCut;
   }
 
   /**

@@ -9,10 +9,18 @@ export interface ElevenLabsRealtimeConfig {
   apiKey: string;
   modelId: string;
   languageCode?: string;
+  autoReconnect?: boolean;
+  maxReconnectAttempts?: number;
+  reconnectDelayMs?: number;
+  maxReconnectDelayMs?: number;
 }
 
 export const DEFAULT_REALTIME_CONFIG: Partial<ElevenLabsRealtimeConfig> = {
   modelId: "scribe_v2_realtime",
+  autoReconnect: true,
+  maxReconnectAttempts: 10,
+  reconnectDelayMs: 1000,
+  maxReconnectDelayMs: 30000,
 };
 
 export class ElevenLabsRealtimeSTT extends EventEmitter {
@@ -20,6 +28,11 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
   private config: ElevenLabsRealtimeConfig;
   private ws: WebSocket | null = null;
   private isConnecting: boolean = false;
+  private reconnectAttempts: number = 0;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private intentionalClose: boolean = false;
+  private audioChunksSent: number = 0;
+  private lastAudioSentAt: number = 0;
   
   constructor(config: Partial<ElevenLabsRealtimeConfig> & { apiKey: string }) {
     super();
@@ -48,6 +61,7 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
       this.ws.on("open", () => {
         logger.info("Connected to ElevenLabs Realtime STT");
         this.isConnecting = false;
+        this.reconnectAttempts = 0; // Reset on successful connection
         resolve();
       });
 
@@ -69,12 +83,61 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
       });
 
       this.ws.on("close", (code, reason) => {
-        logger.info("ElevenLabs STT WebSocket closed", { code, reason: reason.toString() });
+        const timeSinceLastAudio = this.lastAudioSentAt ? Date.now() - this.lastAudioSentAt : 0;
+        logger.info("ElevenLabs STT WebSocket closed", { 
+          code, 
+          reason: reason.toString(),
+          audioChunksSent: this.audioChunksSent,
+          timeSinceLastAudio: `${timeSinceLastAudio}ms`,
+          intentionalClose: this.intentionalClose
+        });
         this.ws = null;
         this.isConnecting = false;
-        this.emit("close");
+        
+        // Only attempt reconnect if:
+        // 1. It wasn't an intentional close
+        // 2. Auto-reconnect is enabled
+        // 3. We haven't exceeded max attempts
+        if (!this.intentionalClose && this.config.autoReconnect && 
+            this.reconnectAttempts < (this.config.maxReconnectAttempts || 10)) {
+          this.scheduleReconnect();
+        } else {
+          this.emit("close");
+        }
       });
     });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+
+    this.reconnectAttempts++;
+    const delay = Math.min(
+      this.config.reconnectDelayMs! * Math.pow(2, this.reconnectAttempts - 1),
+      this.config.maxReconnectDelayMs!
+    );
+
+    logger.info("Scheduling STT reconnect", { 
+      attempt: this.reconnectAttempts,
+      delayMs: delay,
+      maxAttempts: this.config.maxReconnectAttempts
+    });
+
+    this.reconnectTimer = setTimeout(async () => {
+      try {
+        await this.connect();
+        logger.info("STT reconnected successfully", { attempt: this.reconnectAttempts });
+        this.emit("reconnected");
+      } catch (error) {
+        logger.error("STT reconnect failed", { 
+          attempt: this.reconnectAttempts,
+          error: String(error)
+        });
+        // The close handler will schedule another attempt if we haven't exceeded max
+      }
+    }, delay);
   }
 
   private handleMessage(msg: any): void {
@@ -94,20 +157,50 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
 
   sendAudio(base64Audio: string): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      logger.debug("Cannot send audio, WS not open");
+      logger.debug("Cannot send audio, WS not open", {
+        hasWs: !!this.ws,
+        readyState: this.ws?.readyState
+      });
       return;
     }
+    
     const message = {
       message_type: "input_audio_chunk",
       audio_base_64: base64Audio,
     };
+    
     this.ws.send(JSON.stringify(message));
+    this.audioChunksSent++;
+    this.lastAudioSentAt = Date.now();
+    
+    // Log every 100 chunks to confirm audio flow
+    if (this.audioChunksSent % 100 === 0) {
+      logger.debug("Audio chunks sent to ElevenLabs STT", { 
+        totalChunks: this.audioChunksSent,
+        chunkSizeBytes: base64Audio.length
+      });
+    }
   }
 
   disconnect(): void {
+    this.intentionalClose = true;
+    
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
+    
+    logger.info("STT disconnected intentionally", {
+      totalAudioChunksSent: this.audioChunksSent
+    });
+  }
+  
+  isConnected(): boolean {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN;
   }
 }

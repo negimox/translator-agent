@@ -95,6 +95,8 @@ export class TranslationPipeline extends EventEmitter {
       // Hook up STT events
       this.sttProvider.on("committed", (data: {text: string, language: string}) => this.handleCommittedTranscript(data.text, data.language));
       this.sttProvider.on("error", (err: any) => logger.error("STT Provider Error", { error: err }));
+      this.sttProvider.on("close", () => this.handleSTTClose());
+      this.sttProvider.on("reconnected", () => this.handleSTTReconnected());
     } else {
       this.mizanClient = new MizanClient(this.config.mizan);
     }
@@ -142,6 +144,24 @@ export class TranslationPipeline extends EventEmitter {
       this.sttProvider.disconnect();
     }
     this.conversationContext.reset();
+  }
+
+  private handleSTTClose(): void {
+    logger.warn("STT connection closed permanently", {
+      processed: this.totalSentencesProcessed,
+      failed: this.totalSentencesFailed
+    });
+    // Emit event so TranslatorAgent can handle if needed
+    this.emit("stt_disconnected");
+  }
+
+  private handleSTTReconnected(): void {
+    logger.info("STT connection restored", {
+      processed: this.totalSentencesProcessed,
+      failed: this.totalSentencesFailed
+    });
+    // Emit event so TranslatorAgent knows translation can resume
+    this.emit("stt_reconnected");
   }
 
   submitAudio(base64Audio: string): void {

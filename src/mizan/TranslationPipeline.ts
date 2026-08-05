@@ -46,7 +46,7 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   sourceLanguage: "en",
   targetLanguage: "hi",
   translationTemplatePattern: "translator_{target}",
-  ttsVoice: "hm_psi",
+  ttsVoice: "EXAVITQu4vr4xnSDxMaL",
   ttsSpeed: 1,
   retryInitialDelayMs: 500,
   retryMaxDelayMs: 8000,
@@ -57,7 +57,7 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   circuitBreakerWindowMs: 60000,
   circuitBreakerOpenTimeoutMs: 10000,
   providerFactory: undefined,
-  useElevenLabs: true, // Switched to true for Realtime migration
+  useElevenLabs: true,
   contextWindowSize: 5,
   contextStalenessMs: 30000,
 };
@@ -78,23 +78,36 @@ export class TranslationPipeline extends EventEmitter {
   private totalSentencesProcessed: number = 0;
   private totalSentencesFailed: number = 0;
 
-  private onAudioReady: ((audio: ArrayBuffer, sentenceId: string) => void) | null = null;
+  private onAudioReady:
+    | ((audio: ArrayBuffer, sentenceId: string) => void)
+    | null = null;
 
   constructor(config: Partial<TranslationPipelineConfig> = {}) {
     super();
     this.config = { ...DEFAULT_PIPELINE_CONFIG, ...config };
 
     if (this.config.useElevenLabs && this.config.providerFactory) {
-      this.sttProvider = this.config.providerFactory.getSTTProvider('elevenlabs', {
-        languageCode: this.config.sourceLanguage,
-        instanceId: this.config.sourceLanguage,
-      });
-      this.translationProvider = this.config.providerFactory.getTranslationProvider('mizan');
-      this.ttsProvider = this.config.providerFactory.getTTSProvider('elevenlabs');
-      
+      this.sttProvider = this.config.providerFactory.getSTTProvider(
+        "elevenlabs",
+        {
+          languageCode: this.config.sourceLanguage,
+          instanceId: this.config.sourceLanguage,
+        },
+      );
+      this.translationProvider =
+        this.config.providerFactory.getTranslationProvider("mizan");
+      this.ttsProvider =
+        this.config.providerFactory.getTTSProvider("elevenlabs");
+
       // Hook up STT events
-      this.sttProvider.on("committed", (data: {text: string, language: string}) => this.handleCommittedTranscript(data.text, data.language));
-      this.sttProvider.on("error", (err: any) => logger.error("STT Provider Error", { error: err }));
+      this.sttProvider.on(
+        "committed",
+        (data: { text: string; language: string }) =>
+          this.handleCommittedTranscript(data.text, data.language),
+      );
+      this.sttProvider.on("error", (err: any) =>
+        logger.error("STT Provider Error", { error: err }),
+      );
       this.sttProvider.on("close", () => this.handleSTTClose());
       this.sttProvider.on("reconnected", () => this.handleSTTReconnected());
     } else {
@@ -118,20 +131,24 @@ export class TranslationPipeline extends EventEmitter {
     });
   }
 
-  setOnAudioReady(callback: (audio: ArrayBuffer, sentenceId: string) => void): void {
+  setOnAudioReady(
+    callback: (audio: ArrayBuffer, sentenceId: string) => void,
+  ): void {
     this.onAudioReady = callback;
   }
 
   async start(): Promise<void> {
     if (this.isRunning) return;
     this.isRunning = true;
-    
+
     if (this.sttProvider) {
       try {
         await this.sttProvider.connect();
         logger.info("TranslationPipeline started with Realtime STT");
       } catch (err) {
-        logger.error("Failed to connect to Realtime STT", { error: String(err) });
+        logger.error("Failed to connect to Realtime STT", {
+          error: String(err),
+        });
       }
     }
   }
@@ -139,7 +156,7 @@ export class TranslationPipeline extends EventEmitter {
   stop(): void {
     if (!this.isRunning) return;
     this.isRunning = false;
-    
+
     if (this.sttProvider) {
       this.sttProvider.disconnect();
     }
@@ -149,7 +166,7 @@ export class TranslationPipeline extends EventEmitter {
   private handleSTTClose(): void {
     logger.warn("STT connection closed permanently", {
       processed: this.totalSentencesProcessed,
-      failed: this.totalSentencesFailed
+      failed: this.totalSentencesFailed,
     });
     // Emit event so TranslatorAgent can handle if needed
     this.emit("stt_disconnected");
@@ -158,7 +175,7 @@ export class TranslationPipeline extends EventEmitter {
   private handleSTTReconnected(): void {
     logger.info("STT connection restored", {
       processed: this.totalSentencesProcessed,
-      failed: this.totalSentencesFailed
+      failed: this.totalSentencesFailed,
     });
     // Emit event so TranslatorAgent knows translation can resume
     this.emit("stt_reconnected");
@@ -171,26 +188,49 @@ export class TranslationPipeline extends EventEmitter {
     }
   }
 
-  private async handleCommittedTranscript(text: string, detectedLanguage: string): Promise<void> {
+  private async handleCommittedTranscript(
+    text: string,
+    detectedLanguage: string,
+  ): Promise<void> {
     if (!text.trim()) return;
-    
+
     // Filter out filler words like "yeah", "um" if they are the only words
-    const words = text.split(/\s+/).filter(w => w.length > 0);
+    const words = text.split(/\s+/).filter((w) => w.length > 0);
     if (words.length < 3) {
-      const FILLERS = new Set(["yeah", "um", "uh", "okay", "ok", "hmm", "hm", "ah", "oh", "right", "so", "like", "well", "mhm", "mm", "mh"]);
-      if (words.every(w => FILLERS.has(w.toLowerCase()))) {
+      const FILLERS = new Set([
+        "yeah",
+        "um",
+        "uh",
+        "okay",
+        "ok",
+        "hmm",
+        "hm",
+        "ah",
+        "oh",
+        "right",
+        "so",
+        "like",
+        "well",
+        "mhm",
+        "mm",
+        "mh",
+      ]);
+      if (words.every((w) => FILLERS.has(w.toLowerCase()))) {
         return;
       }
     }
 
     const mappedLang = this.mapLanguageCode(detectedLanguage || "en");
     if (mappedLang === this.config.targetLanguage) {
-      logger.debug("Detected language matches target, skipping translation", { detectedLanguage, targetLanguage: this.config.targetLanguage });
+      logger.debug("Detected language matches target, skipping translation", {
+        detectedLanguage,
+        targetLanguage: this.config.targetLanguage,
+      });
       return;
     }
 
-    const sentenceId = `sent_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-    
+    const sentenceId = `sent_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
     try {
       if (!this.circuitBreaker.allowRequest()) {
         logger.warn("Circuit breaker open, dropping sentence", { text });
@@ -198,9 +238,9 @@ export class TranslationPipeline extends EventEmitter {
       }
 
       await this.waitForTokens(MIZAN_TOKEN_COSTS.FULL_PIPELINE);
-      
+
       let translationResult;
-      
+
       if (this.translationProvider) {
         translationResult = await this.translationProvider.translate({
           text,
@@ -211,7 +251,7 @@ export class TranslationPipeline extends EventEmitter {
       } else {
         throw new Error("No translation provider available");
       }
-      
+
       this.conversationContext.addTurn(text, translationResult.text);
 
       let audioBuffer;
@@ -227,15 +267,16 @@ export class TranslationPipeline extends EventEmitter {
 
       this.circuitBreaker.recordSuccess();
       this.totalSentencesProcessed++;
-      
+
       if (this.onAudioReady && audioBuffer) {
         this.onAudioReady(audioBuffer, sentenceId);
       }
-      
     } catch (err) {
       this.circuitBreaker.recordFailure();
       this.totalSentencesFailed++;
-      logger.error("Error processing committed transcript", { error: String(err) });
+      logger.error("Error processing committed transcript", {
+        error: String(err),
+      });
     }
   }
 
@@ -246,11 +287,11 @@ export class TranslationPipeline extends EventEmitter {
       urd: "ur",
       ara: "ar",
       tr: "tr",
-      fra: "fr"
+      fra: "fr",
     };
     return codeMap[code] || code;
   }
-  
+
   private async waitForTokens(amount: number): Promise<void> {
     return new Promise((resolve) => {
       const checkTokens = () => {
@@ -264,7 +305,7 @@ export class TranslationPipeline extends EventEmitter {
       checkTokens();
     });
   }
-  
+
   static getVoiceForLanguage(language: string): string {
     const voiceMap: Record<string, string> = {
       en: "JBFqnCBsd6RMkjVDRZzb", // George - narrative male voice

@@ -106,7 +106,7 @@ export class TranslationPipeline extends EventEmitter {
         },
       );
       this.translationProvider =
-        this.config.providerFactory.getTranslationProvider("mizan");
+        this.config.providerFactory.getTranslationProvider();
       this.ttsProvider =
         this.config.providerFactory.getTTSProvider("elevenlabs");
 

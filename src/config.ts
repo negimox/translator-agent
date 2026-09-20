@@ -66,12 +66,28 @@ export interface AgentConfig {
   elevenLabsTimeoutMs: number;
 
   // ============================================================================
-  // Mizan API settings (Phase 4, Translation only in Phase 7.1+)
+  // DeepL API settings (Translation — primary provider)
+  // ============================================================================
+  deepLApiKey: string;
+  /** Free tier: https://api-free.deepl.com/v2 | Pro: https://api.deepl.com/v2 */
+  deepLBaseUrl: string;
+  deepLTimeoutMs: number;
+
+  // ============================================================================
+  // Mizan API settings (Phase 4, Translation fallback in Phase 7.1+)
   // ============================================================================
   mizanBaseUrl: string;
   mizanUsername: string;
   mizanPassword: string;
   mizanTimeoutMs: number;
+
+  /**
+   * Translation provider selection.
+   * - 'deepl'                     → DeepL only
+   * - 'mizan'                     → Mizan LLM only (legacy)
+   * - 'deepl-with-mizan-fallback' → DeepL primary, Mizan fallback (default)
+   */
+  translationProvider: "deepl" | "mizan" | "deepl-with-mizan-fallback";
 
   // Translation settings (Phase 4)
   translationTemplatePattern: string; // e.g., 'translator_{source}_to_{target}'
@@ -169,13 +185,28 @@ export function loadConfig(): AgentConfig {
     elevenLabsTimeoutMs: parseIntEnv(process.env.ELEVENLABS_TIMEOUT_MS, 30000),
 
     // ============================================================================
-    // Mizan API settings (Phase 4, Translation only in Phase 7.1+)
+    // DeepL API settings (primary translation provider)
+    // ============================================================================
+    deepLApiKey: process.env.DEEPL_API_KEY || "",
+    deepLBaseUrl:
+      process.env.DEEPL_BASE_URL || "https://api-free.deepl.com/v2",
+    deepLTimeoutMs: parseIntEnv(process.env.DEEPL_TIMEOUT_MS, 15000),
+
+    // ============================================================================
+    // Mizan API settings (Phase 4, fallback translation provider)
     // ============================================================================
     mizanBaseUrl:
       process.env.MIZAN_BASE_URL || "https://platform.mizanlabs.com/api/v1",
     mizanUsername: process.env.MIZAN_USERNAME || "",
     mizanPassword: process.env.MIZAN_PASSWORD || "",
     mizanTimeoutMs: parseIntEnv(process.env.MIZAN_TIMEOUT_MS, 30000),
+
+    // Translation provider selection
+    translationProvider: (process.env.TRANSLATION_PROVIDER ||
+      "deepl-with-mizan-fallback") as
+      | "deepl"
+      | "mizan"
+      | "deepl-with-mizan-fallback",
 
     // Translation settings (Phase 4)
     translationTemplatePattern:

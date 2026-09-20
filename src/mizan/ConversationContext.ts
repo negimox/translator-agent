@@ -37,7 +37,9 @@ export interface DialogueTurn {
  * Configuration for the conversation context manager.
  */
 export interface ConversationContextConfig {
-  /** Number of recent turns to keep in the sliding window (default: 5) */
+  /** Whether context injection is enabled at all (default: false) */
+  enabled: boolean;
+  /** Number of recent turns to keep in the sliding window (default: 2) */
   windowSize: number;
   /** Milliseconds after which context is considered stale and cleared (default: 30000) */
   stalenessMs: number;
@@ -49,7 +51,8 @@ export interface ConversationContextConfig {
  * Default configuration.
  */
 export const DEFAULT_CONTEXT_CONFIG: ConversationContextConfig = {
-  windowSize: 5,
+  enabled: false,
+  windowSize: 2,
   stalenessMs: 30000,
   maxTurnChars: 200,
 };
@@ -87,6 +90,8 @@ export class ConversationContext {
     translation: string,
     speakerId?: string,
   ): void {
+    if (!this.config.enabled) return;
+
     // Truncate long text to stay within token budget
     const truncatedTranscription = this.truncate(
       transcription,
@@ -141,6 +146,8 @@ export class ConversationContext {
    * \`\`\`
    */
   getContextBlock(): string {
+    if (!this.config.enabled) return "";
+
     // Purge stale turns
     this.purgeStale();
 
@@ -155,8 +162,10 @@ export class ConversationContext {
 
     return [
       "",
+      "<<<REFERENCE_ONLY_DO_NOT_TRANSLATE>>>",
       "Recent conversation for reference (use ONLY for resolving pronouns and ambiguity, do NOT translate this):",
       ...lines,
+      "<<<END_REFERENCE>>>",
       "",
     ].join("\n");
   }

@@ -87,11 +87,19 @@ async function main(): Promise<void> {
         timeoutMs: config.mizanTimeoutMs,
         templatePattern: config.translationTemplatePattern,
       },
+      deepl: {
+        apiKey: config.deepLApiKey,
+        baseUrl: config.deepLBaseUrl,
+        timeoutMs: config.deepLTimeoutMs,
+      },
+      translationProvider: config.translationProvider,
     });
 
     logger.info("Provider factory initialized", {
       hasElevenLabs: !!config.elevenLabsApiKey,
       hasMizan: !!(config.mizanUsername && config.mizanPassword),
+      hasDeepL: !!config.deepLApiKey,
+      translationProvider: config.translationProvider,
     });
 
     // Check provider health on startup

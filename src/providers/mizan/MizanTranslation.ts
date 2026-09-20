@@ -290,6 +290,11 @@ export class MizanTranslation implements ITranslationProvider {
         /^(Hindi|Arabic|Urdu|English|अनुवाद|الترجمة|ترجمہ):\s*/i,
         "",
       );
+
+      // Remove any leaked context history reference blocks
+      const refRegex = /<<<REFERENCE_ONLY_DO_NOT_TRANSLATE>>>[\s\S]*?<<<END_REFERENCE>>>/i;
+      cleaned = cleaned.replace(refRegex, "");
+      cleaned = cleaned.replace(/<<<END_REFERENCE>>>/i, "");
     }
 
     // Remove wrapping quotes if the LLM added them

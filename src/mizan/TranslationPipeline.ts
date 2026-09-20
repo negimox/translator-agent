@@ -39,6 +39,16 @@ export interface TranslationPipelineConfig {
   useElevenLabs?: boolean;
   contextWindowSize: number;
   contextStalenessMs: number;
+  /**
+   * When true, conversation context (prior turns) is injected into the
+   * translation request. Should only be enabled when using Mizan LLM
+   * (which benefits from context for pronoun resolution).
+   *
+   * IMPORTANT: Must be false (default) when using DeepL as the translation
+   * provider — DeepL doesn't use context and the history injection that
+   * was causing output to include prior conversation turns.
+   */
+  useConversationContext: boolean;
 }
 
 export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
@@ -60,6 +70,7 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   useElevenLabs: true,
   contextWindowSize: 5,
   contextStalenessMs: 30000,
+  useConversationContext: false,
 };
 
 export class TranslationPipeline extends EventEmitter {
@@ -242,11 +253,18 @@ export class TranslationPipeline extends EventEmitter {
       let translationResult;
 
       if (this.translationProvider) {
+        // Only inject conversation context when explicitly enabled.
+        // With DeepL as the primary provider, context is not used and
+        // injecting it was causing the LLM fallback to echo prior turns.
+        const conversationContext = this.config.useConversationContext
+          ? this.conversationContext.getContextBlock()
+          : undefined;
+
         translationResult = await this.translationProvider.translate({
           text,
-          sourceLanguage: detectedLanguage || this.config.sourceLanguage, // Pass the dynamically detected language
+          sourceLanguage: detectedLanguage || this.config.sourceLanguage,
           targetLanguage: this.config.targetLanguage,
-          conversationContext: this.conversationContext.getContextBlock(),
+          conversationContext,
         });
       } else {
         throw new Error("No translation provider available");

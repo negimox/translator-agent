@@ -156,6 +156,7 @@ export class FallbackTranslation implements ITranslationProvider {
 
   /**
    * Language pair is supported if either provider supports it.
+   * When source is empty, the primary (DeepL) can auto-detect.
    */
   supportsLanguagePair(source: string, target: string): boolean {
     return (

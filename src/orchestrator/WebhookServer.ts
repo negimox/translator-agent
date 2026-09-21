@@ -257,7 +257,9 @@ export class WebhookServer {
           res.status(400).json({ error: "roomName and language required" });
           return;
         }
-        const agent = await this.agentManager.spawnAgent(roomName, language);
+        // Look up room languages for correct per-agent SOURCE_LANGUAGE computation
+        const roomLanguages = Array.from(this.tracker.getRoomLanguages(roomName));
+        const agent = await this.agentManager.spawnAgent(roomName, language, roomLanguages);
         res.json({ ok: true, agent });
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);

@@ -190,7 +190,7 @@ export class SpawnController {
         // Spawn the agent
         logger.info("Spawning agent for language", { roomName, language });
         try {
-          await this.agentManager.spawnAgent(roomName, language);
+          await this.agentManager.spawnAgent(roomName, language, Array.from(languages));
           this.spawnCooldowns.set(roomName, Date.now());
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);

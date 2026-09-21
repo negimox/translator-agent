@@ -284,14 +284,26 @@ export class DeepLTranslation implements ITranslationProvider {
 
   /**
    * Checks if a language pair is supported.
+   *
+   * When source is empty/undefined, returns true if the target language is
+   * supported — DeepL will auto-detect the source language from the text.
+   * This is critical for the case where STT doesn't reliably provide the
+   * detected language.
    */
   supportsLanguagePair(source: string, target: string): boolean {
-    // DeepL can auto-detect source, so we mainly care about target support
-    return (
-      target in TO_DEEPL_CODE &&
-      this.supportedLanguagePairs.some(
-        (pair) => pair.source === source && pair.target === target,
-      )
+    // Target must be a known DeepL language code
+    if (!(target in TO_DEEPL_CODE)) {
+      return false;
+    }
+
+    // If source is empty/unknown, DeepL can auto-detect — allow it
+    if (!source) {
+      return true;
+    }
+
+    // Otherwise, check the explicit supported pairs list
+    return this.supportedLanguagePairs.some(
+      (pair) => pair.source === source && pair.target === target,
     );
   }
 

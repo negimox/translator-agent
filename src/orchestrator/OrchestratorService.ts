@@ -36,6 +36,9 @@ export class OrchestratorService {
     );
     this.tracker = new ConferenceTracker();
     this.agentManager = new AgentManager(config, this.portAllocator);
+    // Wire tracker reference into AgentManager for room language lookups
+    // (used during agent restarts to compute per-agent SOURCE_LANGUAGE)
+    this.agentManager.setTracker(this.tracker);
     this.spawnController = new SpawnController(
       config,
       this.tracker,

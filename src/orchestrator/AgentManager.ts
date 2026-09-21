@@ -13,12 +13,14 @@ import { TrackedAgent, AgentState, RateLimitUpdateMessage } from "./types";
 import { OrchestratorConfig } from "./OrchestratorConfig";
 import { PortAllocator } from "./PortAllocator";
 import { TranslationPipeline } from "../mizan/TranslationPipeline";
+import { ConferenceTracker } from "./ConferenceTracker";
 
 const logger = createLogger("AgentManager");
 
 export class AgentManager extends EventEmitter {
   private config: OrchestratorConfig;
   private portAllocator: PortAllocator;
+  private tracker: ConferenceTracker | null = null;
   private agents: Map<string, TrackedAgent> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
   private startupTimers: Map<string, NodeJS.Timeout> = new Map();
@@ -31,9 +33,24 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
-   * Spawns a new translator agent for a room/language pair.
+   * Sets the ConferenceTracker reference (set after construction to avoid circular deps).
    */
-  async spawnAgent(roomName: string, language: string): Promise<TrackedAgent> {
+  setTracker(tracker: ConferenceTracker): void {
+    this.tracker = tracker;
+  }
+
+  /**
+   * Spawns a new translator agent for a room/language pair.
+   * @param roomLanguages All languages present in the room. Used to compute
+   *   the agent's SOURCE_LANGUAGE. For 2-language rooms (e.g., [en, hi]),
+   *   translator-en gets SOURCE_LANGUAGE=hi and vice versa. For 3+ languages,
+   *   SOURCE_LANGUAGE is set to 'auto' to let DeepL auto-detect.
+   */
+  async spawnAgent(
+    roomName: string,
+    language: string,
+    roomLanguages?: string[],
+  ): Promise<TrackedAgent> {
     const agentId = `${roomName}:${language}`;
 
     // Check if already running
@@ -83,6 +100,7 @@ export class AgentManager extends EventEmitter {
       language,
       botPagePort,
       healthPort,
+      roomLanguages,
     );
 
     // Fork the child process
@@ -327,31 +345,71 @@ export class AgentManager extends EventEmitter {
     });
 
     await this.killAgent(agentId);
+
+    // Look up current room languages from ConferenceTracker for correct
+    // SOURCE_LANGUAGE computation on restart.
+    let roomLanguages: string[] | undefined;
+    if (this.tracker) {
+      roomLanguages = Array.from(this.tracker.getRoomLanguages(roomName));
+    }
+
     // spawnAgent picks up restartCount from existing entry, but killAgent
     // now deletes the entry. Pass the incremented count via a temporary entry.
-    const newAgent = await this.spawnAgent(roomName, language);
+    const newAgent = await this.spawnAgent(roomName, language, roomLanguages);
     newAgent.restartCount = restartCount + 1;
   }
 
   /**
    * Builds the environment variables for a child agent process.
+   *
+   * Computes SOURCE_LANGUAGE per-agent based on room languages:
+   * - 2-language room (en + hi): translator-hi → SOURCE_LANGUAGE=en, translator-en → SOURCE_LANGUAGE=hi
+   * - 3+ language room: SOURCE_LANGUAGE=auto (rely on DeepL auto-detection)
+   * - Unknown/missing: SOURCE_LANGUAGE=auto (safe default)
    */
   private buildChildEnv(
     roomName: string,
     language: string,
     botPagePort: number,
     healthPort: number,
+    roomLanguages?: string[],
   ): NodeJS.ProcessEnv {
-    // Determine source language: the agent translates FROM all other languages TO this language.
-    // So if the agent is for 'hi', it translates English → Hindi.
-    // The sourceLanguage in the original config is a default; for orchestrator agents
-    // the target language IS the agent's language.
+    // Compute the source language for this agent.
+    // The agent translates FROM other languages TO its target language.
+    let sourceLanguage: string;
+
+    if (roomLanguages && roomLanguages.length > 0) {
+      // Filter out this agent's own target language to get "other" languages
+      const otherLanguages = roomLanguages.filter((l) => l !== language);
+
+      if (otherLanguages.length === 1) {
+        // 2-language room: source is the single other language
+        sourceLanguage = otherLanguages[0];
+      } else if (otherLanguages.length > 1) {
+        // 3+ language room: multiple source languages, use auto-detect
+        sourceLanguage = "auto";
+      } else {
+        // Only this agent's language in the room (shouldn't happen during spawn)
+        sourceLanguage = "auto";
+      }
+    } else {
+      // Room languages not available — use auto-detect as safe default
+      sourceLanguage = "auto";
+    }
+
+    logger.debug("Computed agent source language", {
+      agentId: `${roomName}:${language}`,
+      targetLanguage: language,
+      sourceLanguage,
+      roomLanguages: roomLanguages || [],
+    });
+
     return {
       ...process.env,
       JITSI_DOMAIN: this.config.jitsiDomain,
       ROOM_NAME: roomName,
       TARGET_LANGUAGE: language,
-      SOURCE_LANGUAGE: this.config.sourceLanguage,
+      SOURCE_LANGUAGE: sourceLanguage,
       BOT_PAGE_PORT: String(botPagePort),
       HEALTH_PORT: String(healthPort),
       MIZAN_BASE_URL: this.config.mizanBaseUrl,

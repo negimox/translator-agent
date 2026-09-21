@@ -129,7 +129,11 @@ export function loadConfig(): AgentConfig {
     jitsiDomain: validateRequiredEnv("JITSI_DOMAIN", process.env.JITSI_DOMAIN),
     roomName: validateRequiredEnv("ROOM_NAME", process.env.ROOM_NAME),
     targetLanguage: process.env.TARGET_LANGUAGE || "en",
-    sourceLanguage: process.env.SOURCE_LANGUAGE || "en", // Phase 4
+    sourceLanguage: (() => {
+      const sl = process.env.SOURCE_LANGUAGE || "en";
+      // 'auto' means rely on DeepL auto-detection (used in 3+ language rooms)
+      return sl === "auto" ? "" : sl;
+    })(), // Phase 4
     displayNamePrefix: process.env.AGENT_DISPLAY_NAME_PREFIX || "translator-",
 
     // Audio/Worklet settings (Phase 2)

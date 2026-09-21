@@ -231,13 +231,33 @@ export class TranslationPipeline extends EventEmitter {
       }
     }
 
-    const mappedLang = this.mapLanguageCode(detectedLanguage || "unknown");
-    if (mappedLang === this.config.targetLanguage) {
+    // Map the detected language code (e.g. "hin" → "hi", "eng" → "en")
+    const mappedLang = this.mapLanguageCode(detectedLanguage || "");
+
+    // Guard 1: If STT reliably detected the language and it matches target, skip.
+    if (mappedLang && mappedLang === this.config.targetLanguage) {
       logger.debug("Detected language matches target, skipping translation", {
         detectedLanguage,
+        mappedLang,
         targetLanguage: this.config.targetLanguage,
       });
       return;
+    }
+
+    // Resolve the source language for the translation request.
+    // Priority: STT-detected language → config.sourceLanguage → empty (auto-detect)
+    // CRITICAL: If the resolved source equals the target, use auto-detect instead
+    // to prevent self-translation errors (e.g., en→en when config.sourceLanguage='en'
+    // and the actual speech is in a different language).
+    let resolvedSourceLanguage = mappedLang || this.config.sourceLanguage;
+    if (resolvedSourceLanguage === this.config.targetLanguage) {
+      // Source === target would cause a self-translation error.
+      // Use empty string to let DeepL auto-detect the actual language.
+      logger.debug("Source equals target, using auto-detect", {
+        resolvedSourceLanguage,
+        targetLanguage: this.config.targetLanguage,
+      });
+      resolvedSourceLanguage = "";
     }
 
     const sentenceId = `sent_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -262,12 +282,30 @@ export class TranslationPipeline extends EventEmitter {
 
         translationResult = await this.translationProvider.translate({
           text,
-          sourceLanguage: detectedLanguage || this.config.sourceLanguage,
+          sourceLanguage: resolvedSourceLanguage,
           targetLanguage: this.config.targetLanguage,
           conversationContext,
         });
       } else {
         throw new Error("No translation provider available");
+      }
+
+      // Guard 2: Post-translation check — if DeepL detected that the source
+      // language is actually the same as the target, discard the result.
+      // This handles the case where a speaker uses the target language itself.
+      if (
+        translationResult.detectedSourceLanguage &&
+        this.mapLanguageCode(translationResult.detectedSourceLanguage) ===
+          this.config.targetLanguage
+      ) {
+        logger.debug(
+          "Post-translation: detected source matches target, discarding",
+          {
+            detectedSourceLanguage: translationResult.detectedSourceLanguage,
+            targetLanguage: this.config.targetLanguage,
+          },
+        );
+        return;
       }
 
       this.conversationContext.addTurn(text, translationResult.text);

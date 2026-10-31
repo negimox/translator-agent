@@ -81,6 +81,57 @@ const MIZAN_SUPPORTED_PAIRS: Array<{ source: string; target: string }> = [
 ];
 
 /**
+ * Cleans raw model output: drops <think> reasoning (including unterminated
+ * blocks), extracts <translate> content, and removes residual markers.
+ */
+export function cleanTranslationOutput(text: string): string {
+  let cleaned = text.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
+
+  const translateMatch = cleaned.match(/<translate>([\s\S]*?)<\/translate>/i);
+  if (translateMatch) {
+    cleaned = translateMatch[1].trim();
+  } else {
+    cleaned = cleaned.replace(/<\/?translate>/gi, "");
+
+    // Remove any residual [TRANSLATE] markers
+    cleaned = cleaned.replace(/\[TRANSLATE\]/gi, "");
+    cleaned = cleaned.replace(/\[\/TRANSLATE\]/gi, "");
+    cleaned = cleaned.trim();
+
+    // Remove common LLM meta-commentary patterns
+    cleaned = cleaned.replace(
+      /^(Translation|Translated text|Output|Result):\s*/i,
+      "",
+    );
+
+    // Remove language labels that the few-shot format can teach the model to emit
+    cleaned = cleaned.replace(
+      /^(Hindi|Arabic|Urdu|English|अनुवाद|الترجمة|ترجمہ):\s*/i,
+      "",
+    );
+
+    // Remove any leaked context history reference blocks
+    const refRegex = /<<<REFERENCE_ONLY_DO_NOT_TRANSLATE>>>[\s\S]*?<<<END_REFERENCE>>>/i;
+    cleaned = cleaned.replace(refRegex, "");
+    cleaned = cleaned.replace(/<<<END_REFERENCE>>>/i, "");
+  }
+
+  cleaned = cleaned.trim();
+
+  // Remove wrapping quotes if the LLM added them
+  if (
+    cleaned.length >= 2 &&
+    ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+      (cleaned.startsWith("'") && cleaned.endsWith("'")) ||
+      (cleaned.startsWith("\u201C") && cleaned.endsWith("\u201D")))
+  ) {
+    cleaned = cleaned.slice(1, -1);
+  }
+
+  return cleaned.trim();
+}
+
+/**
  * Mizan Translation Provider.
  *
  * Uses template-based translation with Mizan LLM API.
@@ -268,51 +319,17 @@ export class MizanTranslation implements ITranslationProvider {
    * Cleans up translation output by removing residual markers and meta-commentary.
    */
   private cleanTranslation(text: string): string {
-    let cleaned = text.trim();
-
-    // Extract content from <translate>...</translate> if present
-    const translateMatch = cleaned.match(/<translate>([\s\S]*?)<\/translate>/i);
-    if (translateMatch) {
-      cleaned = translateMatch[1].trim();
-    } else {
-      // Remove any residual [TRANSLATE] markers
-      cleaned = cleaned.replace(/\[TRANSLATE\]/gi, "");
-      cleaned = cleaned.replace(/\[\/TRANSLATE\]/gi, "");
-
-      // Remove common LLM meta-commentary patterns
-      cleaned = cleaned.replace(
-        /^(Translation|Translated text|Output|Result):\s*/i,
-        "",
-      );
-
-      // Remove language labels that the few-shot format can teach the model to emit
-      cleaned = cleaned.replace(
-        /^(Hindi|Arabic|Urdu|English|अनुवाद|الترجمة|ترجمہ):\s*/i,
-        "",
-      );
-
-      // Remove any leaked context history reference blocks
-      const refRegex = /<<<REFERENCE_ONLY_DO_NOT_TRANSLATE>>>[\s\S]*?<<<END_REFERENCE>>>/i;
-      cleaned = cleaned.replace(refRegex, "");
-      cleaned = cleaned.replace(/<<<END_REFERENCE>>>/i, "");
-    }
-
-    // Remove wrapping quotes if the LLM added them
-    if (
-      (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
-      (cleaned.startsWith("'") && cleaned.endsWith("'")) ||
-      (cleaned.startsWith("\u201C") && cleaned.endsWith("\u201D"))
-    ) {
-      cleaned = cleaned.slice(1, -1);
-    }
-
-    return cleaned.trim();
+    return cleanTranslationOutput(text);
   }
 
   /**
    * Checks if a language pair is supported.
    */
   supportsLanguagePair(source: string, target: string): boolean {
+    if (source === "") {
+      // Auto-detected source: supported if any pair targets this language
+      return this.supportedLanguagePairs.some((pair) => pair.target === target);
+    }
     return this.supportedLanguagePairs.some(
       (pair) => pair.source === source && pair.target === target,
     );

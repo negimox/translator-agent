@@ -13,6 +13,7 @@ import { TrackedAgent, AgentState, RateLimitUpdateMessage } from "./types";
 import { OrchestratorConfig } from "./OrchestratorConfig";
 import { PortAllocator } from "./PortAllocator";
 import { ConferenceTracker } from "./ConferenceTracker";
+import { computePerAgentRateLimit } from "./rateLimit";
 
 const logger = createLogger("AgentManager");
 
@@ -301,10 +302,12 @@ export class AgentManager extends EventEmitter {
     const activeCount = this.getTotalAgentCount();
     if (activeCount === 0) return;
 
-    const perAgentCapacity =
-      this.config.globalTokenBucketCapacity / activeCount;
-    const perAgentRefillRate =
-      this.config.globalTokenBucketRefillRate / activeCount;
+    const { capacity: perAgentCapacity, refillRate: perAgentRefillRate } =
+      computePerAgentRateLimit(
+        this.config.globalTokenBucketCapacity,
+        this.config.globalTokenBucketRefillRate,
+        activeCount,
+      );
 
     const msg: RateLimitUpdateMessage = {
       type: "rate-limit-update",

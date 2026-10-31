@@ -13,6 +13,8 @@ export {
   DEFAULT_TOKEN_BUCKET_CONFIG,
 } from "./TokenBucket";
 
+export { TokenWaitQueue, TokenWaitQueueConfig } from "./TokenWaitQueue";
+
 // Circuit Breaker
 export {
   CircuitBreaker,

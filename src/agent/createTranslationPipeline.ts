@@ -41,6 +41,7 @@ export function createTranslationPipeline(
       maxRetries: config.maxRetries,
       tokenBucketCapacity: config.tokenBucketCapacity,
       tokenBucketRefillRate: config.tokenBucketRefillRate,
+      maxPendingSentences: config.maxQueueLength,
       circuitBreakerErrorThreshold: config.circuitBreakerErrorThreshold,
       circuitBreakerWindowMs: config.circuitBreakerWindowMs,
       circuitBreakerOpenTimeoutMs: config.circuitBreakerOpenTimeoutMs,

@@ -8,6 +8,7 @@
 import { EventEmitter } from "events";
 import { createLogger } from "../logger";
 import { TokenBucket, MIZAN_TOKEN_COSTS } from "./TokenBucket";
+import { TokenWaitQueue } from "./TokenWaitQueue";
 import { CircuitBreaker, CircuitState } from "./CircuitBreaker";
 import { ConversationContext } from "./ConversationContext";
 import {
@@ -29,6 +30,10 @@ export interface TranslationPipelineConfig {
   maxRetries: number;
   tokenBucketCapacity: number;
   tokenBucketRefillRate: number;
+  /** Sentences allowed to wait for tokens; the oldest is dropped beyond this. */
+  maxPendingSentences: number;
+  /** A sentence that cannot get tokens within this long is dropped. */
+  maxTokenWaitMs: number;
   circuitBreakerErrorThreshold: number;
   circuitBreakerWindowMs: number;
   circuitBreakerOpenTimeoutMs: number;
@@ -57,6 +62,8 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   maxRetries: 3,
   tokenBucketCapacity: 8,
   tokenBucketRefillRate: 8,
+  maxPendingSentences: 12,
+  maxTokenWaitMs: 10_000,
   circuitBreakerErrorThreshold: 0.1,
   circuitBreakerWindowMs: 60000,
   circuitBreakerOpenTimeoutMs: 10000,
@@ -69,6 +76,7 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
 export class TranslationPipeline extends EventEmitter {
   private config: TranslationPipelineConfig;
   private tokenBucket: TokenBucket;
+  private tokenWaitQueue: TokenWaitQueue;
   private circuitBreaker: CircuitBreaker;
 
   private sttProvider: IRealtimeSTTProvider | null = null;
@@ -126,6 +134,11 @@ export class TranslationPipeline extends EventEmitter {
       refillRate: this.config.tokenBucketRefillRate,
     });
 
+    this.tokenWaitQueue = new TokenWaitQueue(this.tokenBucket, {
+      maxPending: this.config.maxPendingSentences,
+      maxWaitMs: this.config.maxTokenWaitMs,
+    });
+
     this.circuitBreaker = new CircuitBreaker({
       errorThreshold: this.config.circuitBreakerErrorThreshold,
       errorWindowMs: this.config.circuitBreakerWindowMs,
@@ -163,6 +176,9 @@ export class TranslationPipeline extends EventEmitter {
   stop(): void {
     if (!this.isRunning) return;
     this.isRunning = false;
+
+    // Release every sentence still waiting for tokens.
+    this.tokenWaitQueue.cancelAll();
 
     if (this.sttProvider) {
       this.sttProvider.disconnect();
@@ -269,7 +285,18 @@ export class TranslationPipeline extends EventEmitter {
         return;
       }
 
-      await this.waitForTokens(MIZAN_TOKEN_COSTS.FULL_PIPELINE);
+      const gotTokens = await this.tokenWaitQueue.acquire(
+        MIZAN_TOKEN_COSTS.FULL_PIPELINE,
+      );
+      if (!gotTokens || !this.isRunning) {
+        // Dropped under backpressure or the pipeline stopped. This is load
+        // shedding, not a provider failure, so the circuit breaker is untouched.
+        logger.warn("Dropping sentence under backpressure", {
+          text,
+          pending: this.tokenWaitQueue.pendingCount,
+        });
+        return;
+      }
 
       let translationResult;
 
@@ -347,20 +374,6 @@ export class TranslationPipeline extends EventEmitter {
     };
     const normalized = code.toLowerCase();
     return codeMap[normalized] || normalized;
-  }
-
-  private async waitForTokens(amount: number): Promise<void> {
-    return new Promise((resolve) => {
-      const checkTokens = () => {
-        const result = this.tokenBucket.tryAcquire(amount);
-        if (result.acquired) {
-          resolve();
-        } else {
-          setTimeout(checkTokens, result.waitTimeMs);
-        }
-      };
-      checkTokens();
-    });
   }
 
   getMetrics() {

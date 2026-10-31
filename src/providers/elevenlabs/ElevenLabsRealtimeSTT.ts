@@ -44,6 +44,20 @@ export interface ElevenLabsRealtimeConfig {
   reconnectDelayMs?: number;
   /** Maximum reconnect backoff delay. @default 30000 */
   maxReconnectDelayMs?: number;
+  /**
+   * A session that stays open at least this long is considered healthy: when it
+   * closes, the reconnect attempt counter starts over. Sessions that close sooner
+   * (accept-then-drop loops) keep consuming the attempt budget.
+   * @default 10000
+   */
+  stableSessionMs?: number;
+  /**
+   * How long to hold a plain committed transcript waiting for its
+   * timestamped twin (which carries `language_code`). If the twin does not
+   * arrive in time, `committed` is emitted with `language: ""`.
+   * @default 1000
+   */
+  timestampedWaitMs?: number;
 }
 
 const DEFAULTS = {
@@ -55,7 +69,17 @@ const DEFAULTS = {
   maxReconnectAttempts: 10,
   reconnectDelayMs: 1000,
   maxReconnectDelayMs: 30_000,
+  stableSessionMs: 10_000,
+  timestampedWaitMs: 1000,
 } as const;
+
+/** How many fallback-emitted segments we remember to drop their late timestamped twin. */
+const MAX_REMEMBERED_FALLBACKS = 8;
+
+interface PendingCommit {
+  text: string;
+  timer: NodeJS.Timeout;
+}
 
 export class ElevenLabsRealtimeSTT extends EventEmitter {
   public readonly name = "ElevenLabs-RealtimeSTT";
@@ -68,6 +92,8 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
   private intentionalClose = false;
   private reconnectAttempts = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  /** Epoch ms when the current session finished its handshake. */
+  private connectedAt = 0;
 
   /** Safety commit timer — fires every maxCommitIntervalMs if VAD hasn't triggered */
   private commitTimer: NodeJS.Timeout | null = null;
@@ -82,6 +108,15 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
   private lastCommittedText = "";
   private isFirstChunkAfterConnect = true;
 
+  /**
+   * Plain COMMITTED_TRANSCRIPT segments waiting for their timestamped twin.
+   * Each entry is resolved exactly once: by the twin (language known) or by
+   * its fallback timer (language "").
+   */
+  private pendingCommits: PendingCommit[] = [];
+  /** Texts already emitted by the fallback timer; their late twin is ignored. */
+  private fallbackEmittedTexts: string[] = [];
+
   constructor(config: ElevenLabsRealtimeConfig) {
     super();
     this.config = { ...DEFAULTS, ...config } as Required<ElevenLabsRealtimeConfig>;
@@ -93,6 +128,8 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
   // ─────────────────────────────────────────────────────────────────
 
   async connect(): Promise<void> {
+    // An explicit connect() after disconnect() must re-enable auto-reconnect.
+    this.intentionalClose = false;
     if (this.connection || this.isConnecting) return;
     this.isConnecting = true;
 
@@ -115,19 +152,27 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
         vadThreshold: this.config.vadThreshold,
         // Strip fillers, false starts, disfluencies
         noVerbatim: this.config.noVerbatim,
+        // Timestamped commits carry the detected language_code
+        includeTimestamps: true,
         // Language hint — helps accuracy when primary language is known
         ...(this.config.languageCode ? { languageCode: this.config.languageCode } : {}),
       });
 
       this.attachEventHandlers();
       this.isConnecting = false;
-      this.reconnectAttempts = 0;
+      // The attempt budget is NOT reset here: a server that accepts and then
+      // immediately closes would otherwise reconnect forever. The CLOSE handler
+      // resets it only after a session proved stable.
+      this.connectedAt = Date.now();
       this.isFirstChunkAfterConnect = true;
 
       logger.info("Connected to ElevenLabs Realtime STT");
     } catch (err) {
       this.isConnecting = false;
       logger.error("Failed to connect to ElevenLabs Realtime STT", { error: String(err) });
+      if (!this.intentionalClose) {
+        this.scheduleReconnect();
+      }
       throw err;
     }
   }
@@ -175,6 +220,7 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
     this.intentionalClose = true;
     this.clearCommitTimer();
     this.clearReconnectTimer();
+    this.clearPendingCommits();
 
     if (this.connection) {
       try {
@@ -217,25 +263,37 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
 
     this.connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, (data) => {
       logger.info("Committed transcript received", { text: data.text });
+      if (!data.text) return;
       // Cache for previousText context on reconnect
-      if (data.text) {
-        this.lastCommittedText = data.text;
-      }
-      this.emit("committed", {
-        text: data.text,
-        // @ts-ignore - language_code might exist depending on sdk version/config
-        language: data.language_code || "",
-      });
+      this.lastCommittedText = data.text;
+      // Hold the segment until its timestamped twin supplies language_code.
+      // If the twin never arrives (not guaranteed by the API), emit anyway.
+      this.holdPendingCommit(data.text);
     });
 
     this.connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT_WITH_TIMESTAMPS, (data) => {
-      // Forward the language from timestamped events if available
-      if (data.language_code) {
-        // Update the last emit with language info if we get it here
-        logger.debug("Committed transcript language detected", {
-          language: data.language_code,
-        });
+      if (!data.text) return;
+      const language = data.language_code ?? "";
+      logger.debug("Committed transcript with timestamps received", { language });
+
+      const pendingIdx = this.pendingCommits.findIndex((p) => p.text === data.text);
+      if (pendingIdx !== -1) {
+        clearTimeout(this.pendingCommits[pendingIdx].timer);
+        this.pendingCommits.splice(pendingIdx, 1);
+        this.emit("committed", { text: data.text, language });
+        return;
       }
+
+      const fallbackIdx = this.fallbackEmittedTexts.indexOf(data.text);
+      if (fallbackIdx !== -1) {
+        // Already emitted by the fallback timer — never emit a segment twice.
+        this.fallbackEmittedTexts.splice(fallbackIdx, 1);
+        logger.debug("Late timestamped transcript ignored (already emitted)", { language });
+        return;
+      }
+
+      // Timestamped event without a plain twin: emit it directly.
+      this.emit("committed", { text: data.text, language });
     });
 
     // Granular error events — log with appropriate severity, emit "error" for fatal ones
@@ -294,6 +352,11 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
       this.clearCommitTimer();
 
       if (!this.intentionalClose) {
+        // A long-lived session proves the server is healthy: start the budget over.
+        const sessionMs = Date.now() - this.connectedAt;
+        if (sessionMs >= this.config.stableSessionMs) {
+          this.reconnectAttempts = 0;
+        }
         this.scheduleReconnect();
       } else {
         this.emit("close");
@@ -336,10 +399,43 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
   }
 
   // ─────────────────────────────────────────────────────────────────
+  // Pending committed transcripts (waiting for language_code)
+  // ─────────────────────────────────────────────────────────────────
+
+  private holdPendingCommit(text: string): void {
+    const entry: PendingCommit = {
+      text,
+      timer: setTimeout(() => {
+        const idx = this.pendingCommits.indexOf(entry);
+        if (idx === -1) return;
+        this.pendingCommits.splice(idx, 1);
+        logger.debug("Timestamped transcript did not arrive — emitting without language", {
+          waitMs: this.config.timestampedWaitMs,
+        });
+        this.fallbackEmittedTexts.push(text);
+        if (this.fallbackEmittedTexts.length > MAX_REMEMBERED_FALLBACKS) {
+          this.fallbackEmittedTexts.shift();
+        }
+        this.emit("committed", { text, language: "" });
+      }, this.config.timestampedWaitMs),
+    };
+    this.pendingCommits.push(entry);
+  }
+
+  private clearPendingCommits(): void {
+    for (const p of this.pendingCommits) clearTimeout(p.timer);
+    this.pendingCommits = [];
+    this.fallbackEmittedTexts = [];
+  }
+
+  // ─────────────────────────────────────────────────────────────────
   // Reconnection
   // ─────────────────────────────────────────────────────────────────
 
   private scheduleReconnect(): void {
+    // A reconnect is already queued; don't stack a second one.
+    if (this.reconnectTimer) return;
+
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
       logger.error("Max STT reconnect attempts reached — giving up", {
         attempts: this.reconnectAttempts,
@@ -361,6 +457,7 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
     });
 
     this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
       try {
         await this.connect();
         logger.info("STT reconnected successfully", {
@@ -372,7 +469,7 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
           attempt: this.reconnectAttempts,
           error: String(error),
         });
-        // The CLOSE handler on the next failed connection will schedule another attempt
+        // connect() already scheduled the next attempt (or gave up with "close")
       }
     }, delay);
   }

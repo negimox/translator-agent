@@ -53,25 +53,25 @@ export const ELEVENLABS_STT_MODELS = {
  * - No Urdu-verified voices - must use eleven_v3 model
  */
 export const ELEVENLABS_VOICES: Record<string, VoiceConfig> = {
-  // Arabic - only Sarah has verified Arabic support
+  // Arabic - George for warm, captivating storytelling tone
   ar: {
-    voiceId: "EXAVITQu4vr4xnSDxMaL",
+    voiceId: "JBFqnCBsd6RMkjVDRZzb",
     model: ELEVENLABS_MODELS.ELEVEN_MULTILINGUAL_V2,
-    verified: true,
-    name: "Sarah",
-    gender: "female",
+    verified: false,
+    name: "George",
+    gender: "male",
   },
 
-  // Urdu - No verified voices, use Sarah with eleven_v3
+  // Urdu - Reva (gentle, warm narration)
   ur: {
-    voiceId: "EXAVITQu4vr4xnSDxMaL",
+    voiceId: "UT6USLtoAlXHj5k4sOLY",
     model: ELEVENLABS_MODELS.ELEVEN_V3,
-    verified: false, // Urdu not verified, needs quality testing
-    name: "Sarah",
+    verified: false,
+    name: "Reva",
     gender: "female",
   },
 
-  // English - Roger for male voice, flash for low latency
+  // English - River (relaxed, calm, informative)
   en: {
     voiceId: "CwhRBWXzGAHq8TQ4Fs17",
     model: ELEVENLABS_MODELS.ELEVEN_FLASH_V2_5,
@@ -80,12 +80,12 @@ export const ELEVENLABS_VOICES: Record<string, VoiceConfig> = {
     gender: "male",
   },
 
-  // Hindi - Nichalia for best multi-language support
+  // Hindi
   hi: {
-    voiceId: "acCWxmzPBgXdHwA63uzP",
+    voiceId: "UT6USLtoAlXHj5k4sOLY",
     model: ELEVENLABS_MODELS.ELEVEN_FLASH_V2_5,
     verified: true,
-    name: "Nichalia",
+    name: "Reva",
     gender: "female",
   },
 };

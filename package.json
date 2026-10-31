@@ -8,7 +8,8 @@
     "start:index": "npm run build && node dist/index.js",
     "start": "npm run build && node dist/orchestrator-main.js",
     "dev": "./node_modules/.bin/ts-node src/index.ts",
-    "lint": "./node_modules/.bin/eslint src/**/*.ts"
+    "lint": "./node_modules/.bin/eslint src/**/*.ts",
+    "test": "TS_NODE_TRANSPILE_ONLY=1 node --require ts-node/register --test \"test/**/*.test.ts\""
   },
   "keywords": [
     "jitsi",
@@ -20,18 +21,21 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "puppeteer": "^22.0.0",
+    "@elevenlabs/elevenlabs-js": "^2.61.0",
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "dotenv": "^16.3.1"
+    "puppeteer": "^22.0.0",
+    "ws": "^8.21.2"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
     "@types/express": "^4.17.21",
-    "typescript": "^5.3.0",
-    "ts-node": "^10.9.2",
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
-    "eslint": "^8.0.0"
+    "eslint": "^8.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0"
   },
   "engines": {
     "node": ">=18.0.0"

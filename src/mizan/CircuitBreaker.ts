@@ -157,6 +157,17 @@ export class CircuitBreaker extends EventEmitter {
   }
 
   /**
+   * Gives back the half-open test slot taken by allowRequest() when the call
+   * never reached the provider (e.g. the sentence was dropped for load).
+   * Without this the slot is lost and the circuit can stay half-open forever.
+   */
+  releaseRequest(): void {
+    if (this.state === CircuitState.HALF_OPEN && this.halfOpenCallCount > 0) {
+      this.halfOpenCallCount--;
+    }
+  }
+
+  /**
    * Records a successful call.
    */
   recordSuccess(): void {

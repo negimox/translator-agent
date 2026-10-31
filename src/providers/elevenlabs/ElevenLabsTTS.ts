@@ -175,10 +175,10 @@ export class ElevenLabsTTS implements ITTSProvider {
     const voiceId = request.voiceId || voiceConfig.voiceId;
     const model = voiceConfig.model;
 
-    // Use streaming endpoint
+    // Use streaming endpoint with latency optimization for real-time translation
     const outputFormat =
       OUTPUT_FORMAT_MAP[request.outputFormat || "mp3"] || "mp3_44100_128";
-    const url = `${this.config.baseUrl}${ELEVENLABS_API.TTS_ENDPOINT}/${voiceId}/stream?output_format=${outputFormat}`;
+    const url = `${this.config.baseUrl}${ELEVENLABS_API.TTS_ENDPOINT}/${voiceId}/stream?output_format=${outputFormat}&optimize_streaming_latency=2`;
 
     const body: ElevenLabsTTSBody = {
       text: request.text,

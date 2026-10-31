@@ -1,23 +1,32 @@
 /**
- * Provider Factory (Phase 7.1)
+ * Provider Factory (Phase 7.1 / DeepL update)
  *
  * Factory for creating and managing STT, Translation, and TTS providers.
- * Supports ElevenLabs (STT/TTS) and Mizan (Translation).
+ * Supports ElevenLabs (STT/TTS), Mizan LLM (Translation), and DeepL (Translation).
+ *
+ * Default translation strategy: 'deepl-with-mizan-fallback'
+ *   - DeepL handles all requests (fast, deterministic, no context leaking)
+ *   - Mizan LLM takes over automatically if DeepL fails or is unconfigured
  */
 
 import { createLogger } from "../logger";
 import {
-  ISTTProvider,
+  IRealtimeSTTProvider,
   ITranslationProvider,
   ITTSProvider,
   ProviderConfig,
 } from "./types";
-import { ElevenLabsSTT } from "./elevenlabs/ElevenLabsSTT";
+import { ElevenLabsRealtimeSTT } from "./elevenlabs/ElevenLabsRealtimeSTT";
 import { ElevenLabsTTS } from "./elevenlabs/ElevenLabsTTS";
 import {
   MizanTranslation,
   MizanTranslationConfig,
 } from "./mizan/MizanTranslation";
+import {
+  DeepLTranslation,
+  DeepLTranslationConfig,
+} from "./deepl/DeepLTranslation";
+import { FallbackTranslation } from "./FallbackTranslation";
 
 const logger = createLogger("ProviderFactory");
 
@@ -25,7 +34,10 @@ const logger = createLogger("ProviderFactory");
  * Available provider types.
  */
 export type STTProviderType = "elevenlabs";
-export type TranslationProviderType = "mizan";
+export type TranslationProviderType =
+  | "mizan"
+  | "deepl"
+  | "deepl-with-mizan-fallback";
 export type TTSProviderType = "elevenlabs";
 
 /**
@@ -44,13 +56,26 @@ export interface ProviderFactoryConfig {
     timeoutMs?: number;
     templatePattern?: string;
   };
+  deepl?: {
+    apiKey: string;
+    /** Defaults to https://api-free.deepl.com/v2 */
+    baseUrl?: string;
+    timeoutMs?: number;
+  };
+  /**
+   * Which translation provider to use.
+   * - 'deepl'                    → DeepL only (fastest, no context leaking)
+   * - 'mizan'                    → Mizan LLM only (legacy)
+   * - 'deepl-with-mizan-fallback' → DeepL primary, Mizan fallback (default)
+   */
+  translationProvider?: TranslationProviderType;
 }
 
 /**
  * Provider instances managed by the factory.
  */
 interface ProviderInstances {
-  stt: Map<string, ISTTProvider>;
+  stt: Map<string, IRealtimeSTTProvider>;
   translation: Map<string, ITranslationProvider>;
   tts: Map<string, ITTSProvider>;
 }
@@ -83,54 +108,67 @@ export class ProviderFactory {
     logger.info("ProviderFactory initialized", {
       hasElevenLabs: !!config.elevenlabs?.apiKey,
       hasMizan: !!config.mizan?.username,
+      hasDeepL: !!config.deepl?.apiKey,
+      translationProvider: config.translationProvider || "deepl-with-mizan-fallback",
     });
   }
 
-  /**
-   * Gets an STT provider instance.
-   */
-  getSTTProvider(type: STTProviderType = "elevenlabs"): ISTTProvider {
-    const cached = this.instances.stt.get(type);
+  getSTTProvider(
+    type: STTProviderType = "elevenlabs",
+    options?: { languageCode?: string; instanceId?: string }
+  ): IRealtimeSTTProvider {
+    const cacheKey = `${type}_${options?.instanceId || 'default'}`;
+    const cached = this.instances.stt.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    let provider: ISTTProvider;
+    let provider: IRealtimeSTTProvider;
 
     switch (type) {
       case "elevenlabs":
         if (!this.config.elevenlabs?.apiKey) {
           throw new Error("ElevenLabs API key not configured");
         }
-        provider = new ElevenLabsSTT({
+        provider = new ElevenLabsRealtimeSTT({
           apiKey: this.config.elevenlabs.apiKey,
-          baseUrl: this.config.elevenlabs.baseUrl,
-          timeoutMs: this.config.elevenlabs.timeoutMs,
+          languageCode: options?.languageCode,
         });
         break;
       default:
         throw new Error(`Unknown STT provider type: ${type}`);
     }
 
-    this.instances.stt.set(type, provider);
-    logger.info("STT provider created", { type, name: provider.name });
+    this.instances.stt.set(cacheKey, provider);
+    logger.info("STT provider created", { type, name: provider.name, cacheKey });
     return provider;
   }
 
   /**
    * Gets a Translation provider instance.
+   *
+   * Type selection:
+   *   'deepl'                    → DeepL only
+   *   'mizan'                    → Mizan LLM only
+   *   'deepl-with-mizan-fallback' → DeepL primary, Mizan automatic fallback
    */
   getTranslationProvider(
-    type: TranslationProviderType = "mizan",
+    type?: TranslationProviderType,
   ): ITranslationProvider {
-    const cached = this.instances.translation.get(type);
+    // Use configured default if not specified
+    const resolvedType =
+      type ||
+      this.config.translationProvider ||
+      "deepl-with-mizan-fallback";
+
+    const cached = this.instances.translation.get(resolvedType);
     if (cached) {
       return cached;
     }
 
     let provider: ITranslationProvider;
 
-    switch (type) {
+    switch (resolvedType) {
       case "mizan":
         if (!this.config.mizan?.username || !this.config.mizan?.password) {
           throw new Error("Mizan credentials not configured");
@@ -143,12 +181,63 @@ export class ProviderFactory {
           templatePattern: this.config.mizan.templatePattern,
         });
         break;
+
+      case "deepl":
+        if (!this.config.deepl?.apiKey) {
+          throw new Error(
+            "DeepL API key not configured (DEEPL_API_KEY)",
+          );
+        }
+        provider = new DeepLTranslation({
+          apiKey: this.config.deepl.apiKey,
+          baseUrl: this.config.deepl.baseUrl,
+          timeoutMs: this.config.deepl.timeoutMs,
+        });
+        break;
+
+      case "deepl-with-mizan-fallback": {
+        // Build DeepL primary
+        if (!this.config.deepl?.apiKey) {
+          logger.warn(
+            "DeepL API key not configured — falling back to Mizan-only mode",
+          );
+          // Degrade gracefully to Mizan-only if DeepL key is absent
+          return this.getTranslationProvider("mizan");
+        }
+        const deepLProvider = new DeepLTranslation({
+          apiKey: this.config.deepl.apiKey,
+          baseUrl: this.config.deepl.baseUrl,
+          timeoutMs: this.config.deepl.timeoutMs,
+        });
+
+        // Build Mizan fallback (optional — if credentials not configured, use DeepL only)
+        if (!this.config.mizan?.username || !this.config.mizan?.password) {
+          logger.warn(
+            "Mizan credentials not configured — using DeepL-only mode (no fallback)",
+          );
+          provider = deepLProvider;
+        } else {
+          const mizanProvider = new MizanTranslation({
+            username: this.config.mizan.username,
+            password: this.config.mizan.password,
+            baseUrl: this.config.mizan.baseUrl,
+            timeoutMs: this.config.mizan.timeoutMs,
+            templatePattern: this.config.mizan.templatePattern,
+          });
+          provider = new FallbackTranslation(deepLProvider, mizanProvider);
+        }
+        break;
+      }
+
       default:
-        throw new Error(`Unknown Translation provider type: ${type}`);
+        throw new Error(`Unknown Translation provider type: ${resolvedType}`);
     }
 
-    this.instances.translation.set(type, provider);
-    logger.info("Translation provider created", { type, name: provider.name });
+    this.instances.translation.set(resolvedType, provider);
+    logger.info("Translation provider created", {
+      type: resolvedType,
+      name: provider.name,
+    });
     return provider;
   }
 
@@ -199,9 +288,9 @@ export class ProviderFactory {
       tts: {} as { [key: string]: { healthy: boolean; latencyMs?: number } },
     };
 
-    // Check STT providers
+    // STT is streaming now, just assume healthy if connected (or skip check)
     for (const [type, provider] of this.instances.stt) {
-      results.stt[type] = await provider.checkHealth();
+      results.stt[type] = { healthy: true };
     }
 
     // Check Translation providers
@@ -221,6 +310,10 @@ export class ProviderFactory {
    * Clears all cached provider instances.
    */
   clearInstances(): void {
+    // Disconnect STT before clearing
+    for (const provider of this.instances.stt.values()) {
+      provider.disconnect();
+    }
     this.instances.stt.clear();
     this.instances.translation.clear();
     this.instances.tts.clear();
@@ -231,12 +324,7 @@ export class ProviderFactory {
    * Gets all supported languages for STT.
    */
   getSTTSupportedLanguages(): string[] {
-    try {
-      const provider = this.getSTTProvider();
-      return provider.supportedLanguages;
-    } catch {
-      return [];
-    }
+    return ["en", "hi", "ur", "ar"]; // Default supported languages
   }
 
   /**

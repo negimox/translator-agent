@@ -15,7 +15,7 @@ This agent joins Jitsi meetings as a special participant (`translator-<lang>`) a
 - **ElevenLabs TTS**: High-quality text-to-speech with voice selection per language
 - **Extended Language Support**: Added Arabic (ar) and Urdu (ur) to existing English/Hindi
 - **Hybrid Pipeline**: ElevenLabs for STT/TTS, Mizan for translation
-- **Backward Compatibility**: Legacy Mizan-only mode still supported
+- **Provider choice**: `TRANSLATION_PROVIDER` selects `deepl`, `mizan`, or `deepl-with-mizan-fallback` (default); each needs its own credentials
 
 ### Phase 2 (Completed)
 
@@ -68,7 +68,7 @@ This agent joins Jitsi meetings as a special participant (`translator-<lang>`) a
 | Variable          | Default | Description                                                |
 | ----------------- | ------- | ---------------------------------------------------------- |
 | `TARGET_LANGUAGE` | `en`    | Language code for this agent (`en`, `hi`, `ar`, `ur`)      |
-| `SOURCE_LANGUAGE` | `en`    | Source language for STT (auto-detect if not specified)     |
+| `SOURCE_LANGUAGE` | `en`    | Informational only: the spoken language is detected per sentence |
 | `HEALTH_PORT`     | `8080`  | Health check server port                                   |
 | `CHROME_HEADLESS` | `true`  | Run Chrome in headless mode                                |
 | `LOG_LEVEL`       | `info`  | Logging level (`debug`, `info`, `warn`, `error`)           |
@@ -149,7 +149,7 @@ TARGET_LANGUAGE=ur ROOM_NAME=test HEALTH_PORT=8083 npm start
 | Arabic   | `ar` | ✅ ElevenLabs | ✅ Mizan | ✅ ElevenLabs | Sarah (Multilingual v2) |
 | Urdu     | `ur` | ✅ ElevenLabs | ✅ Mizan | ✅ ElevenLabs | Sarah (eleven_v3) |
 
-**Note:** When `ELEVENLABS_API_KEY` is provided, the agent uses ElevenLabs for STT/TTS and Mizan for translation. Without the key, it falls back to Mizan-only mode (English and Hindi only).
+**Note:** When `ELEVENLABS_API_KEY` is provided, the agent uses ElevenLabs for STT/TTS and Mizan for translation. Without the key the agent refuses to start (non-zero exit). The Mizan-only mode has been removed.
 
 ## Architecture
 

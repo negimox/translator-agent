@@ -17,6 +17,11 @@ export interface AgentHealthState {
   heartbeatHealthy: boolean;
   meetingConnected: boolean;
   pipelineHealthy?: boolean; // Phase 4: Translation pipeline health
+  /**
+   * True when the pipeline lost STT for good. Unlike pipelineHealthy (readiness
+   * only), this fails liveness so the orchestrator watchdog restarts the agent.
+   */
+  pipelineFailed?: boolean;
   uptime: number;
 }
 
@@ -35,8 +40,8 @@ export interface HealthStatus {
  */
 export function getLivenessStatus(healthState: AgentHealthState): HealthStatus {
   return {
-    healthy: healthState.chrome,
-    ready: healthState.chrome,
+    healthy: healthState.chrome && !healthState.pipelineFailed,
+    ready: healthState.chrome && !healthState.pipelineFailed,
   };
 }
 

@@ -23,7 +23,7 @@ export interface AgentConfig {
   jitsiDomain: string;
   roomName: string;
   targetLanguage: string;
-  sourceLanguage: string; // Phase 4: Source language for STT
+  sourceLanguage: string; // Informational: STT/translation detect the language per sentence
   displayNamePrefix: string;
 
   // Audio/Worklet settings (Phase 2)
@@ -66,16 +66,31 @@ export interface AgentConfig {
   elevenLabsTimeoutMs: number;
 
   // ============================================================================
-  // Mizan API settings (Phase 4, Translation only in Phase 7.1+)
+  // DeepL API settings (Translation — primary provider)
+  // ============================================================================
+  deepLApiKey: string;
+  /** Free tier: https://api-free.deepl.com/v2 | Pro: https://api.deepl.com/v2 */
+  deepLBaseUrl: string;
+  deepLTimeoutMs: number;
+
+  // ============================================================================
+  // Mizan API settings (Phase 4, Translation fallback in Phase 7.1+)
   // ============================================================================
   mizanBaseUrl: string;
   mizanUsername: string;
   mizanPassword: string;
   mizanTimeoutMs: number;
 
+  /**
+   * Translation provider selection.
+   * - 'deepl'                     → DeepL only
+   * - 'mizan'                     → Mizan LLM only (legacy)
+   * - 'deepl-with-mizan-fallback' → DeepL primary, Mizan fallback (default)
+   */
+  translationProvider: "deepl" | "mizan" | "deepl-with-mizan-fallback";
+
   // Translation settings (Phase 4)
   translationTemplatePattern: string; // e.g., 'translator_{source}_to_{target}'
-  ttsVoice: string;
   ttsSpeed: number;
 
   // Rate limiting (Phase 4)
@@ -113,7 +128,11 @@ export function loadConfig(): AgentConfig {
     jitsiDomain: validateRequiredEnv("JITSI_DOMAIN", process.env.JITSI_DOMAIN),
     roomName: validateRequiredEnv("ROOM_NAME", process.env.ROOM_NAME),
     targetLanguage: process.env.TARGET_LANGUAGE || "en",
-    sourceLanguage: process.env.SOURCE_LANGUAGE || "en", // Phase 4
+    sourceLanguage: (() => {
+      const sl = process.env.SOURCE_LANGUAGE || "en";
+      // 'auto' means rely on DeepL auto-detection (used in 3+ language rooms)
+      return sl === "auto" ? "" : sl;
+    })(), // Phase 4
     displayNamePrefix: process.env.AGENT_DISPLAY_NAME_PREFIX || "translator-",
 
     // Audio/Worklet settings (Phase 2)
@@ -134,15 +153,15 @@ export function loadConfig(): AgentConfig {
     // VAD settings (Phase 3)
     vadRmsThreshold: parseFloatEnv(process.env.VAD_RMS_THRESHOLD, 0.015), // ~-36dB
     vadSmoothingFrames: parseIntEnv(process.env.VAD_SMOOTHING_FRAMES, 3),
-    vadSilenceCoalesceMs: parseIntEnv(process.env.VAD_SILENCE_COALESCE_MS, 500),
+    vadSilenceCoalesceMs: parseIntEnv(process.env.VAD_SILENCE_COALESCE_MS, 600),
 
     // Chunk aggregation settings (Phase 3)
     targetChunkDurationMs: parseIntEnv(
       process.env.TARGET_CHUNK_DURATION_MS,
-      2000,
+      3000,
     ),
-    minChunkDurationMs: parseIntEnv(process.env.MIN_CHUNK_DURATION_MS, 1500),
-    maxChunkDurationMs: parseIntEnv(process.env.MAX_CHUNK_DURATION_MS, 3000),
+    minChunkDurationMs: parseIntEnv(process.env.MIN_CHUNK_DURATION_MS, 800),
+    maxChunkDurationMs: parseIntEnv(process.env.MAX_CHUNK_DURATION_MS, 5000),
     sampleRate: parseIntEnv(process.env.AUDIO_SAMPLE_RATE, 48000),
 
     // Debug settings (Phase 3)
@@ -169,7 +188,15 @@ export function loadConfig(): AgentConfig {
     elevenLabsTimeoutMs: parseIntEnv(process.env.ELEVENLABS_TIMEOUT_MS, 30000),
 
     // ============================================================================
-    // Mizan API settings (Phase 4, Translation only in Phase 7.1+)
+    // DeepL API settings (primary translation provider)
+    // ============================================================================
+    deepLApiKey: process.env.DEEPL_API_KEY || "",
+    deepLBaseUrl:
+      process.env.DEEPL_BASE_URL || "https://api-free.deepl.com/v2",
+    deepLTimeoutMs: parseIntEnv(process.env.DEEPL_TIMEOUT_MS, 15000),
+
+    // ============================================================================
+    // Mizan API settings (Phase 4, fallback translation provider)
     // ============================================================================
     mizanBaseUrl:
       process.env.MIZAN_BASE_URL || "https://platform.mizanlabs.com/api/v1",
@@ -177,10 +204,16 @@ export function loadConfig(): AgentConfig {
     mizanPassword: process.env.MIZAN_PASSWORD || "",
     mizanTimeoutMs: parseIntEnv(process.env.MIZAN_TIMEOUT_MS, 30000),
 
+    // Translation provider selection
+    translationProvider: (process.env.TRANSLATION_PROVIDER ||
+      "deepl-with-mizan-fallback") as
+      | "deepl"
+      | "mizan"
+      | "deepl-with-mizan-fallback",
+
     // Translation settings (Phase 4)
     translationTemplatePattern:
       process.env.TRANSLATION_TEMPLATE_PATTERN || "translator_{target}",
-    ttsVoice: process.env.TTS_VOICE || "af_heart",
     ttsSpeed: parseFloatEnv(process.env.TTS_SPEED, 1.0),
 
     // Rate limiting (Phase 4)

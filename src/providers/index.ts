@@ -6,7 +6,7 @@
 
 // Types
 export {
-  ISTTProvider,
+  IRealtimeSTTProvider,
   ITranslationProvider,
   ITTSProvider,
   STTRequest,
@@ -32,7 +32,7 @@ export {
 } from "./ProviderFactory";
 
 // ElevenLabs
-export { ElevenLabsSTT } from "./elevenlabs/ElevenLabsSTT";
+export { ElevenLabsRealtimeSTT } from "./elevenlabs/ElevenLabsRealtimeSTT";
 export { ElevenLabsTTS } from "./elevenlabs/ElevenLabsTTS";
 export {
   ElevenLabsConfig,
@@ -53,3 +53,13 @@ export {
   MizanTranslationConfig,
   DEFAULT_MIZAN_TRANSLATION_CONFIG,
 } from "./mizan/MizanTranslation";
+
+// DeepL
+export {
+  DeepLTranslation,
+  DeepLTranslationConfig,
+  DEFAULT_DEEPL_CONFIG,
+} from "./deepl/DeepLTranslation";
+
+// Fallback composite
+export { FallbackTranslation } from "./FallbackTranslation";

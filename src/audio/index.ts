@@ -12,13 +12,7 @@ export { AudioManager, AudioHealth } from "./AudioContextManager";
 export { HeartbeatMonitor } from "./HeartbeatMonitor";
 
 // Phase 3 components
-export {
-  ChunkAggregator,
-  AudioChunk,
-  AudioFrame,
-  ChunkAggregatorConfig,
-  DEFAULT_CHUNK_CONFIG,
-} from "./ChunkAggregator";
+
 export {
   encodeWav,
   validateWav,

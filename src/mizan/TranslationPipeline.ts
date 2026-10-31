@@ -336,6 +336,13 @@ export class TranslationPipeline extends EventEmitter {
         return;
       }
 
+      // The model can return nothing speakable (e.g. only a cut-off <think>
+      // block that was stripped). Don't synthesize silence or count a failure.
+      if (!translationResult.text.trim()) {
+        logger.debug("Empty translation, skipping TTS", { text });
+        return;
+      }
+
       this.conversationContext.addTurn(text, translationResult.text);
 
       let audioBuffer;

@@ -91,7 +91,6 @@ export interface AgentConfig {
 
   // Translation settings (Phase 4)
   translationTemplatePattern: string; // e.g., 'translator_{source}_to_{target}'
-  ttsVoice: string;
   ttsSpeed: number;
 
   // Rate limiting (Phase 4)
@@ -215,7 +214,6 @@ export function loadConfig(): AgentConfig {
     // Translation settings (Phase 4)
     translationTemplatePattern:
       process.env.TRANSLATION_TEMPLATE_PATTERN || "translator_{target}",
-    ttsVoice: process.env.TTS_VOICE || "af_heart",
     ttsSpeed: parseFloatEnv(process.env.TTS_SPEED, 1.0),
 
     // Rate limiting (Phase 4)

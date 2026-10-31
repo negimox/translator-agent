@@ -25,7 +25,6 @@ export interface TranslationPipelineConfig {
   sourceLanguage: string;
   targetLanguage: string;
   translationTemplatePattern: string;
-  ttsVoice: string;
   ttsSpeed: number;
   retryInitialDelayMs: number;
   retryMaxDelayMs: number;
@@ -56,7 +55,6 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   sourceLanguage: "en",
   targetLanguage: "hi",
   translationTemplatePattern: "translator_{target}",
-  ttsVoice: "EXAVITQu4vr4xnSDxMaL",
   ttsSpeed: 1,
   retryInitialDelayMs: 500,
   retryMaxDelayMs: 8000,
@@ -315,7 +313,6 @@ export class TranslationPipeline extends EventEmitter {
         const ttsResult = await this.ttsProvider.synthesize({
           text: translationResult.text,
           language: this.config.targetLanguage,
-          voiceId: this.config.ttsVoice,
           speed: this.config.ttsSpeed,
         });
         audioBuffer = ttsResult.audioBuffer;
@@ -360,23 +357,6 @@ export class TranslationPipeline extends EventEmitter {
       };
       checkTokens();
     });
-  }
-
-  static getVoiceForLanguage(language: string): string {
-    const voiceMap: Record<string, string> = {
-      en: "JBFqnCBsd6RMkjVDRZzb", // George - narrative male voice
-      hi: "EXAVITQu4vr4xnSDxMaL", // Sarah - soft female (multilingual)
-      ur: "EXAVITQu4vr4xnSDxMaL", // Sarah - Urdu uses multilingual voice
-      ar: "onwK4e9ZLuTAKqWW03F9", // Daniel - authoritative male (multilingual)
-      es: "XB0fDUnXU5powFXDhCwa", // Charlotte - conversational female
-      fr: "XB0fDUnXU5powFXDhCwa", // Charlotte - conversational female
-      ja: "EXAVITQu4vr4xnSDxMaL", // Sarah - soft female (multilingual)
-      zh: "EXAVITQu4vr4xnSDxMaL", // Sarah - soft female (multilingual)
-      it: "XB0fDUnXU5powFXDhCwa", // Charlotte - conversational female
-      pt: "XB0fDUnXU5powFXDhCwa", // Charlotte - conversational female
-    };
-
-    return voiceMap[language.toLowerCase()] || "JBFqnCBsd6RMkjVDRZzb";
   }
 
   getMetrics() {

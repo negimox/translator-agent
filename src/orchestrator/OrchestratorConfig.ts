@@ -35,7 +35,6 @@ export interface OrchestratorConfig {
 
   agentDisplayNamePrefix: string;
   sourceLanguage: string;
-  ttsVoice: string;
   ttsSpeed: number;
   translationTemplatePattern: string;
 
@@ -92,7 +91,6 @@ export function loadOrchestratorConfig(): OrchestratorConfig {
     agentDisplayNamePrefix:
       process.env.AGENT_DISPLAY_NAME_PREFIX || "translator-",
     sourceLanguage: process.env.SOURCE_LANGUAGE || "en",
-    ttsVoice: process.env.TTS_VOICE || "af_heart",
     ttsSpeed: parseFloatEnv(process.env.TTS_SPEED, 1.0),
     translationTemplatePattern:
       process.env.TRANSLATION_TEMPLATE_PATTERN || "translator_{target}",

@@ -282,7 +282,6 @@ export class TranslatorAgent {
       sourceLanguage: this.config.sourceLanguage,
       targetLanguage: this.config.targetLanguage,
       translationTemplatePattern: this.config.translationTemplatePattern,
-      ttsVoice: this.config.ttsVoice,
       ttsSpeed: this.config.ttsSpeed,
       retryInitialDelayMs: this.config.retryInitialDelayMs,
       retryMaxDelayMs: this.config.retryMaxDelayMs,

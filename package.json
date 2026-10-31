@@ -8,7 +8,8 @@
     "start:index": "npm run build && node dist/index.js",
     "start": "npm run build && node dist/orchestrator-main.js",
     "dev": "./node_modules/.bin/ts-node src/index.ts",
-    "lint": "./node_modules/.bin/eslint src/**/*.ts"
+    "lint": "./node_modules/.bin/eslint src/**/*.ts",
+    "test": "TS_NODE_TRANSPILE_ONLY=1 node --require ts-node/register --test \"test/**/*.test.ts\""
   },
   "keywords": [
     "jitsi",

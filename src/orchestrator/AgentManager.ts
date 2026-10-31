@@ -42,7 +42,8 @@ export class AgentManager extends EventEmitter {
   /**
    * Spawns a new translator agent for a room/language pair.
    * @param roomLanguages All languages present in the room. Used to compute
-   *   the agent's SOURCE_LANGUAGE. For 2-language rooms (e.g., [en, hi]),
+   *   the agent's SOURCE_LANGUAGE (informational: the pipeline detects the
+   *   spoken language per sentence). For 2-language rooms (e.g., [en, hi]),
    *   translator-en gets SOURCE_LANGUAGE=hi and vice versa. For 3+ languages,
    *   SOURCE_LANGUAGE is set to 'auto' to let DeepL auto-detect.
    */

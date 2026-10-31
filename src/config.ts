@@ -23,7 +23,7 @@ export interface AgentConfig {
   jitsiDomain: string;
   roomName: string;
   targetLanguage: string;
-  sourceLanguage: string; // Phase 4: Source language for STT
+  sourceLanguage: string; // Informational: STT/translation detect the language per sentence
   displayNamePrefix: string;
 
   // Audio/Worklet settings (Phase 2)

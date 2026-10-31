@@ -59,3 +59,20 @@ test("hasFailed is true only after STT gives up, cleared by reconnect", async ()
   assert.equal(p.hasFailed(), false);
   p.stop();
 });
+
+test("a deliberate stop() is not reported as STT giving up", async () => {
+  const { p, stt } = await started();
+  p.stop();
+  stt.emit("close"); // the provider reports its intentional close
+  assert.equal(p.hasFailed(), false);
+});
+
+test("start() after stop() clears an earlier failure", async () => {
+  const { p, stt } = await started();
+  stt.emit("close");
+  p.stop();
+  await p.start();
+  assert.equal(p.hasFailed(), false);
+  assert.equal(p.isHealthy(), true);
+  p.stop();
+});

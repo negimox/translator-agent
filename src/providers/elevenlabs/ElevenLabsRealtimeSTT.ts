@@ -73,8 +73,23 @@ const DEFAULTS = {
   timestampedWaitMs: 1000,
 } as const;
 
-/** How many fallback-emitted segments we remember to drop their late timestamped twin. */
-const MAX_REMEMBERED_FALLBACKS = 8;
+/** How many recently emitted segments we remember to drop their late twin. */
+const MAX_REMEMBERED_EMITS = 8;
+/** A twin event arriving later than this after its sibling was emitted is a new segment. */
+const TWIN_WINDOW_MS = 5000;
+
+/** Trim and collapse whitespace so twin events compare equal. */
+function normalizeText(text: string): string {
+  return text.trim().replace(/\s+/g, " ");
+}
+
+interface RecentEmit {
+  text: string;
+  /** "fallback": plain emitted first, expecting a late timestamped twin.
+   *  "direct": timestamped emitted first, expecting a late plain twin. */
+  kind: "fallback" | "direct";
+  at: number;
+}
 
 interface PendingCommit {
   text: string;
@@ -114,8 +129,8 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
    * its fallback timer (language "").
    */
   private pendingCommits: PendingCommit[] = [];
-  /** Texts already emitted by the fallback timer; their late twin is ignored. */
-  private fallbackEmittedTexts: string[] = [];
+  /** Segments already emitted whose twin event may still arrive; the twin is ignored. */
+  private recentEmits: RecentEmit[] = [];
 
   constructor(config: ElevenLabsRealtimeConfig) {
     super();
@@ -157,6 +172,18 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
         // Language hint — helps accuracy when primary language is known
         ...(this.config.languageCode ? { languageCode: this.config.languageCode } : {}),
       });
+
+      if (this.intentionalClose) {
+        // disconnect() ran while the handshake was in flight: don't leak the session.
+        this.isConnecting = false;
+        try {
+          this.connection.close();
+        } catch {
+          // Ignore close errors
+        }
+        this.connection = null;
+        return;
+      }
 
       this.attachEventHandlers();
       this.isConnecting = false;
@@ -221,6 +248,8 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
     this.clearCommitTimer();
     this.clearReconnectTimer();
     this.clearPendingCommits();
+    // An explicit stop/start cycle gets a fresh reconnect budget.
+    this.reconnectAttempts = 0;
 
     if (this.connection) {
       try {
@@ -246,6 +275,7 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
 
   private attachEventHandlers(): void {
     if (!this.connection) return;
+    const conn = this.connection;
 
     this.connection.on(RealtimeEvents.SESSION_STARTED, (data) => {
       logger.info("STT session started", {
@@ -266,6 +296,10 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
       if (!data.text) return;
       // Cache for previousText context on reconnect
       this.lastCommittedText = data.text;
+      if (this.takeRecentEmit("direct", normalizeText(data.text))) {
+        logger.debug("Plain transcript ignored (timestamped twin already emitted)");
+        return;
+      }
       // Hold the segment until its timestamped twin supplies language_code.
       // If the twin never arrives (not guaranteed by the API), emit anyway.
       this.holdPendingCommit(data.text);
@@ -276,7 +310,8 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
       const language = data.language_code ?? "";
       logger.debug("Committed transcript with timestamps received", { language });
 
-      const pendingIdx = this.pendingCommits.findIndex((p) => p.text === data.text);
+      const key = normalizeText(data.text);
+      const pendingIdx = this.pendingCommits.findIndex((p) => normalizeText(p.text) === key);
       if (pendingIdx !== -1) {
         clearTimeout(this.pendingCommits[pendingIdx].timer);
         this.pendingCommits.splice(pendingIdx, 1);
@@ -284,15 +319,14 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
         return;
       }
 
-      const fallbackIdx = this.fallbackEmittedTexts.indexOf(data.text);
-      if (fallbackIdx !== -1) {
+      if (this.takeRecentEmit("fallback", key)) {
         // Already emitted by the fallback timer — never emit a segment twice.
-        this.fallbackEmittedTexts.splice(fallbackIdx, 1);
         logger.debug("Late timestamped transcript ignored (already emitted)", { language });
         return;
       }
 
-      // Timestamped event without a plain twin: emit it directly.
+      // Timestamped event arrived before its plain twin: emit now and drop the twin.
+      this.rememberEmit("direct", key);
       this.emit("committed", { text: data.text, language });
     });
 
@@ -338,6 +372,9 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
     });
 
     this.connection.on(RealtimeEvents.CLOSE, (_data) => {
+      // A late CLOSE from a dead socket must not tear down its replacement.
+      if (this.connection !== null && this.connection !== conn) return;
+
       const timeSinceLastAudio = this.lastAudioSentAt
         ? Date.now() - this.lastAudioSentAt
         : 0;
@@ -412,10 +449,7 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
         logger.debug("Timestamped transcript did not arrive — emitting without language", {
           waitMs: this.config.timestampedWaitMs,
         });
-        this.fallbackEmittedTexts.push(text);
-        if (this.fallbackEmittedTexts.length > MAX_REMEMBERED_FALLBACKS) {
-          this.fallbackEmittedTexts.shift();
-        }
+        this.rememberEmit("fallback", normalizeText(text));
         this.emit("committed", { text, language: "" });
       }, this.config.timestampedWaitMs),
     };
@@ -425,7 +459,24 @@ export class ElevenLabsRealtimeSTT extends EventEmitter {
   private clearPendingCommits(): void {
     for (const p of this.pendingCommits) clearTimeout(p.timer);
     this.pendingCommits = [];
-    this.fallbackEmittedTexts = [];
+    this.recentEmits = [];
+  }
+
+  private rememberEmit(kind: RecentEmit["kind"], text: string): void {
+    this.recentEmits.push({ text, kind, at: Date.now() });
+    if (this.recentEmits.length > MAX_REMEMBERED_EMITS) {
+      this.recentEmits.shift();
+    }
+  }
+
+  /** Removes and returns true if a matching, still-fresh emit is remembered. */
+  private takeRecentEmit(kind: RecentEmit["kind"], text: string): boolean {
+    const now = Date.now();
+    this.recentEmits = this.recentEmits.filter((e) => now - e.at <= TWIN_WINDOW_MS);
+    const idx = this.recentEmits.findIndex((e) => e.kind === kind && e.text === text);
+    if (idx === -1) return false;
+    this.recentEmits.splice(idx, 1);
+    return true;
   }
 
   // ─────────────────────────────────────────────────────────────────

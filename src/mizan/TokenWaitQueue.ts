@@ -54,6 +54,11 @@ export class TokenWaitQueue {
     });
   }
 
+  /** Re-evaluates the head now, e.g. after the bucket's rate or capacity changed. */
+  poke(): void {
+    this.schedule(0);
+  }
+
   cancelAll(): void {
     this.clearTimer();
     const pending = this.queue;

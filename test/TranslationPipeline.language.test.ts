@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { TranslationPipeline } from "../src/mizan/TranslationPipeline";
 import { makeFakeFactory, flush } from "./helpers/fakes";
 
-// 2-language room: this agent speaks "en" and its configured source is "hi".
-const roomConfig = { sourceLanguage: "hi", targetLanguage: "en" };
+// 2-language room: this agent speaks "en".
+const roomConfig = { targetLanguage: "en" };
 
 async function setup(opts?: Parameters<typeof makeFakeFactory>[0]) {
   const fake = makeFakeFactory(opts);
@@ -54,5 +54,16 @@ test("discards when DeepL detects target language", async () => {
   stt.emit("committed", { text: "how are you feeling today", language: "" });
   await flush();
   assert.equal(ttsCalls.length, 0);
+  p.stop();
+});
+
+test("falls back to auto-detect when STT reports a language the provider cannot translate from", async () => {
+  const { stt, translateCalls, p } = await setup({
+    supports: (source) => ["", "hi", "ur", "ar", "en"].includes(source),
+  });
+  stt.emit("committed", { text: "kuch bhi kaho yaar", language: "mar" });
+  await flush();
+  assert.equal(translateCalls.length, 1);
+  assert.equal(translateCalls[0].sourceLanguage, "");
   p.stop();
 });

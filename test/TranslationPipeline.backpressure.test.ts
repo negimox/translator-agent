@@ -60,7 +60,7 @@ test("pending sentences beyond maxPendingSentences are evicted oldest-first", as
   say(stt, 3); // #0 served, #1 queued, #2 evicts #1
   await flush();
   assert.equal(translateCalls.length, 1);
-  p.getTokenBucket().updateConfig(3, 1000); // tokens flow again
+  p.updateRateLimit(3, 1000); // tokens flow again, and waiting sentences are woken
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(translateCalls.length, 2);
   assert.match(translateCalls[1].text, /number 2/);

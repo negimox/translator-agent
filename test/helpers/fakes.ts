@@ -18,6 +18,7 @@ export class FakeSTT extends EventEmitter {
 export interface FakeFactoryOptions {
   translate?: (req: TranslationRequest) => Promise<TranslationResponse>;
   synthesize?: (req: TTSRequest) => Promise<TTSResponse>;
+  supports?: (source: string, target: string) => boolean;
 }
 
 export function makeFakeFactory(opts: FakeFactoryOptions = {}) {
@@ -28,7 +29,8 @@ export function makeFakeFactory(opts: FakeFactoryOptions = {}) {
   const translation = {
     name: "fake-translation",
     supportedLanguagePairs: [],
-    supportsLanguagePair: () => true,
+    supportsLanguagePair: (source: string, target: string) =>
+      opts.supports ? opts.supports(source, target) : true,
     checkHealth: async () => ({ healthy: true }),
     translate: async (req: TranslationRequest) => {
       translateCalls.push(req);

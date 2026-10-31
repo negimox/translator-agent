@@ -2,7 +2,7 @@
  * Translation Pipeline Orchestrator (Phase 7.2)
  *
  * Coordinates the streaming translation pipeline:
- * Audio Stream → Scribe Realtime (STT) → Translation (Mizan) → TTS (ElevenLabs) → Audio Output
+ * Audio Stream → Scribe Realtime (STT) → Translation (DeepL, Mizan fallback) → TTS (ElevenLabs) → Audio Output
  */
 
 import { EventEmitter } from "events";
@@ -21,7 +21,6 @@ import {
 const logger = createLogger("TranslationPipeline");
 
 export interface TranslationPipelineConfig {
-  sourceLanguage: string;
   targetLanguage: string;
   translationTemplatePattern: string;
   ttsSpeed: number;
@@ -53,7 +52,6 @@ export interface TranslationPipelineConfig {
 }
 
 export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
-  sourceLanguage: "en",
   targetLanguage: "hi",
   translationTemplatePattern: "translator_{target}",
   ttsSpeed: 1,
@@ -160,6 +158,7 @@ export class TranslationPipeline extends EventEmitter {
   async start(): Promise<void> {
     if (this.isRunning) return;
     this.isRunning = true;
+    this.sttGaveUp = false;
 
     if (this.sttProvider) {
       try {
@@ -200,6 +199,8 @@ export class TranslationPipeline extends EventEmitter {
   }
 
   private handleSTTClose(): void {
+    // stop() disconnects STT on purpose; that is not STT giving up.
+    if (!this.isRunning) return;
     this.sttGaveUp = true;
     logger.warn("STT connection closed permanently", {
       processed: this.totalSentencesProcessed,
@@ -272,10 +273,26 @@ export class TranslationPipeline extends EventEmitter {
     }
 
     // The source language comes only from what STT detected (empty = let
-    // DeepL auto-detect). config.sourceLanguage is deliberately NOT used:
+    // DeepL auto-detect). A fixed per-agent source is deliberately not used:
     // DeepL echoes a pinned source_lang back as detected_source_language, which
     // defeats Guard 2 and makes the agent re-speak same-language speech.
-    const resolvedSourceLanguage = mappedLang;
+    // STT can report a code neither provider translates from (e.g. "mar");
+    // sending it would fail the request, so let the provider auto-detect.
+    let resolvedSourceLanguage = mappedLang;
+    if (
+      mappedLang &&
+      this.translationProvider &&
+      !this.translationProvider.supportsLanguagePair(
+        mappedLang,
+        this.config.targetLanguage,
+      )
+    ) {
+      logger.debug("Detected language unsupported by provider, using auto-detect", {
+        detectedLanguage,
+        mappedLang,
+      });
+      resolvedSourceLanguage = "";
+    }
 
     const sentenceId = `sent_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
@@ -291,6 +308,7 @@ export class TranslationPipeline extends EventEmitter {
       if (!gotTokens || !this.isRunning) {
         // Dropped under backpressure or the pipeline stopped. This is load
         // shedding, not a provider failure, so the circuit breaker is untouched.
+        this.circuitBreaker.releaseRequest();
         logger.warn("Dropping sentence under backpressure", {
           text,
           pending: this.tokenWaitQueue.pendingCount,
@@ -333,6 +351,8 @@ export class TranslationPipeline extends EventEmitter {
             targetLanguage: this.config.targetLanguage,
           },
         );
+        // The provider answered; only the speech was already in our language.
+        this.circuitBreaker.recordSuccess();
         return;
       }
 
@@ -340,6 +360,7 @@ export class TranslationPipeline extends EventEmitter {
       // block that was stripped). Don't synthesize silence or count a failure.
       if (!translationResult.text.trim()) {
         logger.debug("Empty translation, skipping TTS", { text });
+        this.circuitBreaker.recordSuccess();
         return;
       }
 
@@ -388,6 +409,15 @@ export class TranslationPipeline extends EventEmitter {
       processed: this.totalSentencesProcessed,
       failed: this.totalSentencesFailed,
     };
+  }
+
+  /**
+   * Applies a new rate limit and wakes sentences waiting for tokens, which
+   * would otherwise sleep on the old (slower) refill estimate.
+   */
+  updateRateLimit(capacity: number, refillRate: number): void {
+    this.tokenBucket.updateConfig(capacity, refillRate);
+    this.tokenWaitQueue.poke();
   }
 
   getTokenBucket() {

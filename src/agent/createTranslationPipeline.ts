@@ -32,7 +32,6 @@ export function createTranslationPipeline(
 
     const pipeline = new TranslationPipeline({
       providerFactory,
-      sourceLanguage: config.sourceLanguage,
       targetLanguage: config.targetLanguage,
       translationTemplatePattern: config.translationTemplatePattern,
       ttsSpeed: config.ttsSpeed,

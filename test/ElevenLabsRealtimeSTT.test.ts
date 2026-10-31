@@ -263,3 +263,94 @@ test("connect after disconnect re-enables reconnect", async () => {
   assert.equal(conns.length, before + 1);
   stt.disconnect();
 });
+
+// ─── Review follow-ups ───
+
+test("a plain event arriving after its directly-emitted timestamped twin is dropped", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const conn = new FakeConnection();
+  const stt = makeSTT(async () => conn);
+  const events: unknown[] = [];
+  stt.on("committed", (e) => events.push(e));
+  await stt.connect();
+  conn.emit(RealtimeEvents.COMMITTED_TRANSCRIPT_WITH_TIMESTAMPS, { text: "hello there", language_code: "eng" });
+  conn.emit(RealtimeEvents.COMMITTED_TRANSCRIPT, { text: "hello there" });
+  await tick(5000);
+  assert.deepEqual(events, [{ text: "hello there", language: "eng" }]);
+  stt.disconnect();
+});
+
+test("twin events that differ only in whitespace are paired", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const conn = new FakeConnection();
+  const stt = makeSTT(async () => conn);
+  const events: unknown[] = [];
+  stt.on("committed", (e) => events.push(e));
+  await stt.connect();
+  conn.emit(RealtimeEvents.COMMITTED_TRANSCRIPT, { text: "hello  there " });
+  conn.emit(RealtimeEvents.COMMITTED_TRANSCRIPT_WITH_TIMESTAMPS, { text: "hello there", language_code: "eng" });
+  await tick(5000);
+  assert.equal(events.length, 1);
+  assert.equal((events[0] as { language: string }).language, "eng");
+  stt.disconnect();
+});
+
+test("a connect that finishes after disconnect() is closed, not leaked", async () => {
+  const conn = new FakeConnection();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const stt = makeSTT(async () => {
+    await gate;
+    return conn;
+  });
+  const pending = stt.connect();
+  stt.disconnect();
+  release();
+  await pending;
+  assert.equal(stt.isConnected(), false);
+});
+
+test("a stale CLOSE from an old connection does not tear down the new one", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const first = new FakeConnection();
+  const second = new FakeConnection();
+  const queue = [first, second];
+  const stt = makeSTT(async () => queue.shift()!, RETRY_CONFIG);
+  await stt.connect();
+  first.close(); // server drop -> reconnect scheduled
+  await tick(1000);
+  assert.equal(stt.isConnected(), true);
+  first.emit(RealtimeEvents.CLOSE, {}); // late duplicate CLOSE from the dead socket
+  await tick(5000);
+  assert.equal(stt.isConnected(), true);
+  stt.disconnect();
+});
+
+test("disconnect() gives a later connect() a fresh reconnect budget", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const conns: FakeConnection[] = [];
+  let failing = false;
+  const stt = makeSTT(async () => {
+    if (failing) throw new Error("down");
+    const c = new FakeConnection();
+    conns.push(c);
+    return c;
+  }, { maxReconnectAttempts: 2, reconnectDelayMs: 1000 });
+  let closes = 0;
+  stt.on("close", () => closes++);
+  await stt.connect();
+  failing = true;
+  conns[0].close();
+  await tick(1000);
+  await tick(2000);
+  await tick(4000); // budget exhausted -> gave up
+  assert.equal(closes, 1);
+  stt.disconnect();
+  failing = false;
+  await stt.connect();
+  failing = true;
+  conns[conns.length - 1].close();
+  await tick(1000); // must retry again rather than give up at once
+  assert.equal(closes, 1);
+  stt.disconnect();
+});

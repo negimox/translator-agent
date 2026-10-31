@@ -16,9 +16,13 @@
 const MIZAN_BASE_URL =
   process.env.MIZAN_BASE_URL ||
   "https://platform.mizanlabs.com:15455/api/v1";
-const MIZAN_USERNAME = process.env.MIZAN_USERNAME || "cloudclinic.ai";
-const MIZAN_PASSWORD =
-  process.env.MIZAN_PASSWORD || "Tf0139s49fWxU1Qs61W01DyR9O9pRgRb";
+const MIZAN_USERNAME = process.env.MIZAN_USERNAME || "";
+const MIZAN_PASSWORD = process.env.MIZAN_PASSWORD || "";
+
+if (!MIZAN_USERNAME || !MIZAN_PASSWORD) {
+  console.error("MIZAN_USERNAME and MIZAN_PASSWORD must be set");
+  process.exit(1);
+}
 
 const authHeader = `Basic ${Buffer.from(`${MIZAN_USERNAME}:${MIZAN_PASSWORD}`).toString("base64")}`;
 

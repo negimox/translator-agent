@@ -149,7 +149,7 @@ TARGET_LANGUAGE=ur ROOM_NAME=test HEALTH_PORT=8083 npm start
 | Arabic   | `ar` | ✅ ElevenLabs | ✅ Mizan | ✅ ElevenLabs | Sarah (Multilingual v2) |
 | Urdu     | `ur` | ✅ ElevenLabs | ✅ Mizan | ✅ ElevenLabs | Sarah (eleven_v3) |
 
-**Note:** When `ELEVENLABS_API_KEY` is provided, the agent uses ElevenLabs for STT/TTS and Mizan for translation. Without the key the translation pipeline is disabled and the agent reports `pipelineHealthy: false` on `/readyz`. The Mizan-only mode has been removed.
+**Note:** When `ELEVENLABS_API_KEY` is provided, the agent uses ElevenLabs for STT/TTS and Mizan for translation. Without the key the agent refuses to start (non-zero exit). The Mizan-only mode has been removed.
 
 ## Architecture
 

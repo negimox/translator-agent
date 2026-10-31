@@ -26,7 +26,7 @@ let isShuttingDown = false;
 /**
  * Graceful shutdown handler.
  */
-async function shutdown(signal: string): Promise<void> {
+async function shutdown(signal: string, exitCode = 0): Promise<void> {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
@@ -40,7 +40,7 @@ async function shutdown(signal: string): Promise<void> {
       await agent.stop();
     }
     logger.info("Shutdown complete");
-    process.exit(0);
+    process.exit(exitCode);
   } catch (error) {
     logger.error("Error during shutdown", { error: String(error) });
     process.exit(1);
@@ -176,7 +176,8 @@ async function main(): Promise<void> {
     });
   } catch (error) {
     logger.error("Failed to start translator agent", { error: String(error) });
-    await shutdown("ERROR");
+    // Non-zero so the orchestrator sees a failed start, not a clean exit.
+    await shutdown("ERROR", 1);
   }
 }
 

@@ -239,14 +239,14 @@ export class TranslatorAgent {
   /**
    * Phase 4/7.1: Initializes the translation pipeline.
    * Which credentials are required depends on TRANSLATION_PROVIDER; the
-   * ProviderFactory validates that. On failure the agent stays up but
-   * untranslating, and reports pipelineHealthy=false on /readyz.
+   * ProviderFactory validates that. A pipeline that cannot be built is a
+   * configuration error, so this throws and start() fails: an agent that
+   * joins a meeting but cannot translate would otherwise look healthy.
    */
   private async initializeTranslationPipeline(): Promise<void> {
     const result = createTranslationPipeline(this.config, getProviderFactory);
     if ("error" in result) {
-      logger.error("Translation pipeline disabled", { error: result.error });
-      return;
+      throw new Error(`Translation pipeline unavailable: ${result.error}`);
     }
     this.translationPipeline = result.pipeline;
 

@@ -26,6 +26,7 @@ import { BotPageServer } from "../server/BotPageServer";
 import { HealthStatus, AgentHealthState } from "../health/HealthChecks";
 import { TranslationPipeline } from "../mizan";
 import { getProviderFactory } from "../providers";
+import { createTranslationPipeline } from "./createTranslationPipeline";
 
 const logger = createLogger("TranslatorAgent");
 
@@ -237,61 +238,17 @@ export class TranslatorAgent {
 
   /**
    * Phase 4/7.1: Initializes the translation pipeline.
-   * In Phase 7.1, supports both ElevenLabs+Mizan and legacy Mizan-only modes.
+   * Which credentials are required depends on TRANSLATION_PROVIDER; the
+   * ProviderFactory validates that. On failure the agent stays up but
+   * untranslating, and reports pipelineHealthy=false on /readyz.
    */
   private async initializeTranslationPipeline(): Promise<void> {
-    // Phase 7.1: Determine provider mode based on ElevenLabs API key
-    const useElevenLabs = !!this.config.elevenLabsApiKey;
-    let providerFactory;
-
-    if (useElevenLabs) {
-      try {
-        providerFactory = getProviderFactory();
-        logger.info(
-          "Using ElevenLabs for STT/TTS + Mizan for Translation (Phase 7.1)",
-        );
-      } catch (error) {
-        logger.warn(
-          "ProviderFactory not initialized, falling back to legacy Mizan mode",
-          { error: String(error) },
-        );
-      }
-    }
-
-    // Validate Mizan credentials (required for translation in both modes)
-    if (!this.config.mizanUsername || !this.config.mizanPassword) {
-      logger.warn(
-        "Mizan credentials not configured - translation pipeline disabled",
-      );
+    const result = createTranslationPipeline(this.config, getProviderFactory);
+    if ("error" in result) {
+      logger.error("Translation pipeline disabled", { error: result.error });
       return;
     }
-
-    // Create translation pipeline
-    this.translationPipeline = new TranslationPipeline({
-      // Provider configuration (Phase 7.1)
-      providerFactory,
-      useElevenLabs,
-
-      // Mizan configuration (used for translation in Phase 7.1, all in legacy mode)
-      mizan: {
-        baseUrl: this.config.mizanBaseUrl,
-        username: this.config.mizanUsername,
-        password: this.config.mizanPassword,
-        timeoutMs: this.config.mizanTimeoutMs,
-      },
-      sourceLanguage: this.config.sourceLanguage,
-      targetLanguage: this.config.targetLanguage,
-      translationTemplatePattern: this.config.translationTemplatePattern,
-      ttsSpeed: this.config.ttsSpeed,
-      retryInitialDelayMs: this.config.retryInitialDelayMs,
-      retryMaxDelayMs: this.config.retryMaxDelayMs,
-      maxRetries: this.config.maxRetries,
-      tokenBucketCapacity: this.config.tokenBucketCapacity,
-      tokenBucketRefillRate: this.config.tokenBucketRefillRate,
-      circuitBreakerErrorThreshold: this.config.circuitBreakerErrorThreshold,
-      circuitBreakerWindowMs: this.config.circuitBreakerWindowMs,
-      circuitBreakerOpenTimeoutMs: this.config.circuitBreakerOpenTimeoutMs,
-    });
+    this.translationPipeline = result.pipeline;
 
     // Set audio output callback (Phase 5: Play translated audio)
     this.translationPipeline.setOnAudioReady(async (audio, chunkId) => {
@@ -453,7 +410,8 @@ export class TranslatorAgent {
     // Phase 3: Check audio bridge health
     const audioBridgeRunning = this.audioBridge !== null;
 
-    const pipelineHealthy = true;
+    const pipelineHealthy = this.translationPipeline?.isHealthy() ?? false;
+    const pipelineFailed = this.translationPipeline?.hasFailed() ?? false;
 
     // Query real audio state from browser (async)
     let audioContextState: "suspended" | "running" | "closed" = "closed";
@@ -491,6 +449,7 @@ export class TranslatorAgent {
       heartbeatHealthy,
       meetingConnected,
       pipelineHealthy,
+      pipelineFailed,
       uptime: this.startTime
         ? Math.floor((Date.now() - this.startTime.getTime()) / 1000)
         : 0,

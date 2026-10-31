@@ -7,7 +7,6 @@ test("TTS request carries no voiceId so ELEVENLABS_VOICES decides", async () => 
   const { factory, stt, ttsCalls } = makeFakeFactory();
   const p = new TranslationPipeline({
     providerFactory: factory,
-    useElevenLabs: true,
     targetLanguage: "hi",
   });
   await p.start();

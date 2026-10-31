@@ -7,7 +7,6 @@
 
 import { EventEmitter } from "events";
 import { createLogger } from "../logger";
-import { MizanClient, MizanConfig } from "./MizanClient";
 import { TokenBucket, MIZAN_TOKEN_COSTS } from "./TokenBucket";
 import { CircuitBreaker, CircuitState } from "./CircuitBreaker";
 import { ConversationContext } from "./ConversationContext";
@@ -21,7 +20,6 @@ import {
 const logger = createLogger("TranslationPipeline");
 
 export interface TranslationPipelineConfig {
-  mizan: Partial<MizanConfig>;
   sourceLanguage: string;
   targetLanguage: string;
   translationTemplatePattern: string;
@@ -35,7 +33,6 @@ export interface TranslationPipelineConfig {
   circuitBreakerWindowMs: number;
   circuitBreakerOpenTimeoutMs: number;
   providerFactory?: ProviderFactory;
-  useElevenLabs?: boolean;
   contextWindowSize: number;
   contextStalenessMs: number;
   /**
@@ -51,7 +48,6 @@ export interface TranslationPipelineConfig {
 }
 
 export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
-  mizan: {},
   sourceLanguage: "en",
   targetLanguage: "hi",
   translationTemplatePattern: "translator_{target}",
@@ -65,7 +61,6 @@ export const DEFAULT_PIPELINE_CONFIG: TranslationPipelineConfig = {
   circuitBreakerWindowMs: 60000,
   circuitBreakerOpenTimeoutMs: 10000,
   providerFactory: undefined,
-  useElevenLabs: true,
   contextWindowSize: 5,
   contextStalenessMs: 30000,
   useConversationContext: false,
@@ -79,9 +74,10 @@ export class TranslationPipeline extends EventEmitter {
   private sttProvider: IRealtimeSTTProvider | null = null;
   private translationProvider: ITranslationProvider | null = null;
   private ttsProvider: ITTSProvider | null = null;
-  private mizanClient: MizanClient | null = null;
 
   private isRunning: boolean = false;
+  /** True once STT exhausted its reconnect attempts; cleared on reconnect. */
+  private sttGaveUp: boolean = false;
   private conversationContext: ConversationContext;
 
   private totalSentencesProcessed: number = 0;
@@ -95,34 +91,35 @@ export class TranslationPipeline extends EventEmitter {
     super();
     this.config = { ...DEFAULT_PIPELINE_CONFIG, ...config };
 
-    if (this.config.useElevenLabs && this.config.providerFactory) {
-      this.sttProvider = this.config.providerFactory.getSTTProvider(
-        "elevenlabs",
-        {
-          // No languageCode: one agent hears every participant, so STT must
-          // auto-detect rather than be pinned to a single language.
-          instanceId: this.config.targetLanguage,
-        },
+    const providerFactory = this.config.providerFactory;
+    if (!providerFactory) {
+      throw new Error(
+        "TranslationPipeline requires a ProviderFactory (ELEVENLABS_API_KEY not set?)",
       );
-      this.translationProvider =
-        this.config.providerFactory.getTranslationProvider();
-      this.ttsProvider =
-        this.config.providerFactory.getTTSProvider("elevenlabs");
-
-      // Hook up STT events
-      this.sttProvider.on(
-        "committed",
-        (data: { text: string; language: string }) =>
-          this.handleCommittedTranscript(data.text, data.language),
-      );
-      this.sttProvider.on("error", (err: any) =>
-        logger.error("STT Provider Error", { error: err }),
-      );
-      this.sttProvider.on("close", () => this.handleSTTClose());
-      this.sttProvider.on("reconnected", () => this.handleSTTReconnected());
-    } else {
-      this.mizanClient = new MizanClient(this.config.mizan);
     }
+
+    this.sttProvider = providerFactory.getSTTProvider(
+      "elevenlabs",
+      {
+        // No languageCode: one agent hears every participant, so STT must
+        // auto-detect rather than be pinned to a single language.
+        instanceId: this.config.targetLanguage,
+      },
+    );
+    this.translationProvider = providerFactory.getTranslationProvider();
+    this.ttsProvider = providerFactory.getTTSProvider("elevenlabs");
+
+    // Hook up STT events
+    this.sttProvider.on(
+      "committed",
+      (data: { text: string; language: string }) =>
+        this.handleCommittedTranscript(data.text, data.language),
+    );
+    this.sttProvider.on("error", (err: any) =>
+      logger.error("STT Provider Error", { error: err }),
+    );
+    this.sttProvider.on("close", () => this.handleSTTClose());
+    this.sttProvider.on("reconnected", () => this.handleSTTReconnected());
 
     this.tokenBucket = new TokenBucket({
       capacity: this.config.tokenBucketCapacity,
@@ -173,7 +170,21 @@ export class TranslationPipeline extends EventEmitter {
     this.conversationContext.reset();
   }
 
+  /**
+   * Healthy while running with a live (or still-reconnecting) STT session.
+   * Turns false once STT has exhausted its reconnect attempts.
+   */
+  isHealthy(): boolean {
+    return this.isRunning && this.sttProvider !== null && !this.sttGaveUp;
+  }
+
+  /** True once STT has permanently given up (not merely not started). */
+  hasFailed(): boolean {
+    return this.sttGaveUp;
+  }
+
   private handleSTTClose(): void {
+    this.sttGaveUp = true;
     logger.warn("STT connection closed permanently", {
       processed: this.totalSentencesProcessed,
       failed: this.totalSentencesFailed,
@@ -183,6 +194,7 @@ export class TranslationPipeline extends EventEmitter {
   }
 
   private handleSTTReconnected(): void {
+    this.sttGaveUp = false;
     logger.info("STT connection restored", {
       processed: this.totalSentencesProcessed,
       failed: this.totalSentencesFailed,

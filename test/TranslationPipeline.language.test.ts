@@ -10,7 +10,6 @@ async function setup(opts?: Parameters<typeof makeFakeFactory>[0]) {
   const fake = makeFakeFactory(opts);
   const p = new TranslationPipeline({
     providerFactory: fake.factory,
-    useElevenLabs: true,
     ...roomConfig,
   });
   await p.start();
